@@ -4,14 +4,34 @@ from simple_history.models import HistoricalRecords
 
 
 class Category(models.Model):
-    name = models.CharField(max_length=128, unique=True)
+    name = models.CharField(max_length=128)
+    parent = models.ForeignKey(
+        "self",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="children",
+    )
+    description = models.TextField(blank=True)
 
     class Meta:
-        ordering = ["name"]
+        ordering = ["parent__name", "name"]
         verbose_name_plural = "categories"
+        constraints = [
+            models.UniqueConstraint(fields=["parent", "name"], name="uniq_category_name_under_parent"),
+        ]
 
     def __str__(self):
-        return self.name
+        return self.full_name
+
+    @property
+    def full_name(self):
+        parts = [self.name]
+        node = self.parent
+        while node is not None:
+            parts.append(node.name)
+            node = node.parent
+        return " > ".join(reversed(parts))
 
 
 class InventoryItem(models.Model):

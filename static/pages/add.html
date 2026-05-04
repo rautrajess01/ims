@@ -116,7 +116,7 @@
           results(res.data).forEach(function (c) {
             var o = document.createElement("option");
             o.value = c.id;
-            o.textContent = c.name;
+            o.textContent = c.full_name || c.name;
             sel.appendChild(o);
           });
         });

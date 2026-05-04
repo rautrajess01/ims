@@ -1,17 +1,17 @@
 import django_filters
-from django.db.models import Q
 
 from .models import InventoryItem, InventoryLog
 
 
 class InventoryItemFilter(django_filters.FilterSet):
     category = django_filters.NumberFilter(field_name="category_id")
+    parent_category = django_filters.NumberFilter(field_name="category__parent_id")
     status = django_filters.CharFilter()
     deployed_to = django_filters.CharFilter(lookup_expr="icontains")
 
     class Meta:
         model = InventoryItem
-        fields = ["category", "status", "deployed_to"]
+        fields = ["category", "parent_category", "status", "deployed_to"]
 
 
 class InventoryLogFilter(django_filters.FilterSet):

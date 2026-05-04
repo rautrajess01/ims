@@ -36,14 +36,14 @@ class LogoutView(TokenBlacklistView):
 
 
 class CategoryViewSet(viewsets.ModelViewSet):
-    queryset = Category.objects.all()
+    queryset = Category.objects.select_related("parent").all()
     serializer_class = CategorySerializer
-    ordering_fields = ("name", "id")
-    ordering = ["name"]
+    ordering_fields = ("name", "id", "parent__name")
+    ordering = ["parent__name", "name"]
 
 
 class InventoryItemViewSet(viewsets.ModelViewSet):
-    queryset = InventoryItem.objects.select_related("category").all()
+    queryset = InventoryItem.objects.select_related("category", "category__parent").all()
     filterset_class = InventoryItemFilter
     search_fields = ("specs", "capacity", "remark")
     ordering_fields = ("created_at", "last_updated", "quantity", "specs", "id")
@@ -98,11 +98,10 @@ class InventoryLogViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, view
 class DashboardAPIView(APIView):
     def get(self, request):
         total_items = InventoryItem.objects.count()
-        by_cat = dict(
-            InventoryItem.objects.values("category__name")
-            .annotate(c=Count("id"))
-            .values_list("category__name", "c")
-        )
+        by_cat = {}
+        for row in InventoryItem.objects.select_related("category", "category__parent").only("id", "category_id"):
+            key = row.category.full_name
+            by_cat[key] = by_cat.get(key, 0) + 1
         by_status = dict(InventoryItem.objects.values("status").annotate(c=Count("id")).values_list("status", "c"))
         recent = InventoryLog.objects.select_related("item", "item__category", "performed_by").order_by(
             "-timestamp"
@@ -145,7 +144,7 @@ class ExportItemsAPIView(APIView):
             writer.writerow(
                 [
                     row.id,
-                    row.category.name,
+                    row.category.full_name,
                     row.specs,
                     row.capacity,
                     row.quantity,
@@ -194,7 +193,7 @@ class ImportItemsAPIView(APIView):
                     str(row.get(col("deployed_to")) or "").strip() if "deployed_to" in normalize else ""
                 )
                 remark = str(row.get(col("remark")) or "").strip() if "remark" in normalize else ""
-                category = Category.objects.filter(name__iexact=cat_name).first()
+                category = self.resolve_category(cat_name)
                 if not category:
                     errors.append({"row": i, "error": f"Unknown category: {cat_name}"})
                     continue
@@ -226,6 +225,18 @@ class ImportItemsAPIView(APIView):
             except Exception as exc:  # noqa: BLE001
                 errors.append({"row": i, "error": str(exc)})
         return Response({"created": created, "errors": errors}, status=status.HTTP_200_OK)
+
+    def resolve_category(self, category_value: str):
+        # Prefer full category path (e.g. "Compute > RAM"), then fallback to exact unique name.
+        target = category_value.strip()
+        if not target:
+            return None
+        candidates = Category.objects.select_related("parent").all()
+        for category in candidates:
+            if category.full_name.lower() == target.lower():
+                return category
+        by_name = Category.objects.filter(name__iexact=target)
+        return by_name.first() if by_name.count() == 1 else None
 
 
 def serve_frontend(request, filename: str):

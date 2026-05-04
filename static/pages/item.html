@@ -139,7 +139,7 @@
           .then(function (res) {
             var it = res[0].data;
             document.getElementById("titleSpecs").textContent = it.specs;
-            document.getElementById("titleCat").textContent = it.category ? it.category.name : "";
+            document.getElementById("titleCat").textContent = it.category ? (it.category.full_name || it.category.name) : "";
             document.getElementById("fCap").textContent = it.capacity || "—";
             document.getElementById("fQty").textContent = it.quantity;
             document.getElementById("fSt").innerHTML = ims.statusBadge(it.status);

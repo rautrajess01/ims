@@ -123,7 +123,7 @@
           results(res[0].data).forEach(function (c) {
             var o = document.createElement("option");
             o.value = c.id;
-            o.textContent = c.name;
+            o.textContent = c.full_name || c.name;
             sel.appendChild(o);
           });
           var it = res[1].data;

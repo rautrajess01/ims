@@ -6,8 +6,9 @@ from .models import Category, InventoryItem, InventoryLog
 
 @admin.register(Category)
 class CategoryAdmin(admin.ModelAdmin):
-    list_display = ("id", "name")
-    search_fields = ("name",)
+    list_display = ("id", "name", "parent", "full_name")
+    list_filter = ("parent",)
+    search_fields = ("name", "parent__name")
 
 
 @admin.register(InventoryItem)

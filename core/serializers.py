@@ -13,9 +13,32 @@ class UserBriefSerializer(serializers.ModelSerializer):
 
 
 class CategorySerializer(serializers.ModelSerializer):
+    parent = serializers.PrimaryKeyRelatedField(queryset=Category.objects.all(), allow_null=True, required=False)
+    parent_name = serializers.SerializerMethodField()
+    full_name = serializers.SerializerMethodField()
+
     class Meta:
         model = Category
-        fields = ("id", "name")
+        fields = ("id", "name", "parent", "parent_name", "description", "full_name")
+
+    def validate_parent(self, value):
+        instance = getattr(self, "instance", None)
+        if instance is None or value is None:
+            return value
+        if value.pk == instance.pk:
+            raise serializers.ValidationError("A category cannot be its own parent.")
+        node = value
+        while node is not None:
+            if node.pk == instance.pk:
+                raise serializers.ValidationError("Circular parent relationship is not allowed.")
+            node = node.parent
+        return value
+
+    def get_parent_name(self, obj):
+        return obj.parent.name if obj.parent else None
+
+    def get_full_name(self, obj):
+        return obj.full_name
 
 
 class InventoryItemSerializer(serializers.ModelSerializer):

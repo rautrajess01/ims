@@ -158,7 +158,7 @@
           }
           addTab("all", "All", true);
           cats.forEach(function (c) {
-            addTab(String(c.id), c.name, false);
+            addTab(String(c.id), c.full_name || c.name, false);
           });
           allItems = results(res[1].data);
           renderRows();

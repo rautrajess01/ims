@@ -146,7 +146,7 @@
               rows.forEach(function (log) {
                 var tr = document.createElement("tr");
                 var spec = log.item ? log.item.specs : "—";
-                var cat = log.item && log.item.category ? log.item.category.name : "—";
+                var cat = log.item && log.item.category ? (log.item.category.full_name || log.item.category.name) : "—";
                 var user = log.performed_by ? log.performed_by.username : "—";
                 tr.innerHTML =
                   "<td><small>" +
@@ -200,7 +200,7 @@
           results(res.data).forEach(function (c) {
             var o = document.createElement("option");
             o.value = c.id;
-            o.textContent = c.name;
+            o.textContent = c.full_name || c.name;
             sel.appendChild(o);
           });
         });
