@@ -1,0 +1,21 @@
+# Python
+WARP.md
+*.pyc
+__pycache__/
+*.pyo
+*.pyd
+
+# Virtual env
+venv/
+.env/
+.env
+# Django stuff
+*.log
+db.sqlite3
+celerybeat-schedule
+
+# IDE
+.vscode/
+.idea/
+
+media/*
