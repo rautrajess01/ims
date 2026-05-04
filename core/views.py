@@ -1,10 +1,15 @@
 import csv
 import io
+import secrets
 
+from django.contrib.auth import get_user_model
+from django.db.models.deletion import ProtectedError
 from django.db.models import Count
-from django.http import FileResponse, Http404, HttpResponse
+from django.http import HttpResponse
+from django.shortcuts import render
 from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
+from rest_framework.exceptions import ValidationError
 from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
@@ -13,14 +18,21 @@ from rest_framework_simplejwt.views import TokenBlacklistView, TokenObtainPairVi
 
 from .filters import InventoryItemFilter, InventoryLogFilter
 from .models import Category, InventoryItem, InventoryLog
+from .permissions import IsStaffOrSuperuserWriteOrReadOnly, IsSuperuser
 from .serializers import (
+    AdminUserSerializer,
     CategorySerializer,
+    CategoryTreeSerializer,
+    CurrentUserSerializer,
     DashboardSerializer,
     HistorySerializer,
     InventoryItemSerializer,
     InventoryItemWriteSerializer,
     InventoryLogSerializer,
+    InventoryLogWriteSerializer,
 )
+
+User = get_user_model()
 
 
 class PublicTokenObtainPairView(TokenObtainPairView):
@@ -35,15 +47,42 @@ class LogoutView(TokenBlacklistView):
     permission_classes = [AllowAny]
 
 
+class CurrentUserAPIView(APIView):
+    def get(self, request):
+        return Response(CurrentUserSerializer(request.user).data)
+
+
 class CategoryViewSet(viewsets.ModelViewSet):
-    queryset = Category.objects.select_related("parent").all()
+    queryset = Category.objects.select_related("parent", "parent__parent").prefetch_related("children").all()
     serializer_class = CategorySerializer
     ordering_fields = ("name", "id", "parent__name")
     ordering = ["parent__name", "name"]
 
+    def get_permissions(self):
+        if self.request.method in ("GET", "HEAD", "OPTIONS"):
+            return [IsStaffOrSuperuserWriteOrReadOnly()]
+        return [IsSuperuser()]
+
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        if instance.children.exists():
+            raise ValidationError({"detail": "Cannot delete this category because it still has child categories."})
+        if instance.items.exists():
+            raise ValidationError({"detail": "Cannot delete this category because inventory items are assigned to it."})
+        try:
+            return super().destroy(request, *args, **kwargs)
+        except ProtectedError as exc:
+            raise ValidationError({"detail": f"Cannot delete this category: {exc}"})
+
+    @action(detail=False, methods=["get"], url_path="tree")
+    def tree(self, request):
+        roots = self.get_queryset().filter(parent__isnull=True).order_by("name")
+        return Response(CategoryTreeSerializer(roots, many=True).data)
+
 
 class InventoryItemViewSet(viewsets.ModelViewSet):
     queryset = InventoryItem.objects.select_related("category", "category__parent").all()
+    permission_classes = [IsStaffOrSuperuserWriteOrReadOnly]
     filterset_class = InventoryItemFilter
     search_fields = ("specs", "capacity", "remark")
     ordering_fields = ("created_at", "last_updated", "quantity", "specs", "id")
@@ -87,21 +126,31 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
         return Response(ser.data)
 
 
-class InventoryLogViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.GenericViewSet):
+class InventoryLogViewSet(viewsets.ModelViewSet):
     queryset = InventoryLog.objects.select_related("item", "item__category", "performed_by").all()
-    serializer_class = InventoryLogSerializer
+    permission_classes = [IsStaffOrSuperuserWriteOrReadOnly]
     filterset_class = InventoryLogFilter
     ordering_fields = ("timestamp", "id", "action")
     ordering = ["-timestamp"]
+
+    def get_serializer_class(self):
+        if self.action in ("create", "update", "partial_update"):
+            return InventoryLogWriteSerializer
+        return InventoryLogSerializer
 
 
 class DashboardAPIView(APIView):
     def get(self, request):
         total_items = InventoryItem.objects.count()
         by_cat = {}
+        by_parent_cat = {}
         for row in InventoryItem.objects.select_related("category", "category__parent").only("id", "category_id"):
             key = row.category.full_name
             by_cat[key] = by_cat.get(key, 0) + 1
+            parent = row.category
+            while parent.parent is not None:
+                parent = parent.parent
+            by_parent_cat[parent.name] = by_parent_cat.get(parent.name, 0) + 1
         by_status = dict(InventoryItem.objects.values("status").annotate(c=Count("id")).values_list("status", "c"))
         recent = InventoryLog.objects.select_related("item", "item__category", "performed_by").order_by(
             "-timestamp"
@@ -113,12 +162,28 @@ class DashboardAPIView(APIView):
         )
         body = {
             "count_by_category": by_cat,
+            "count_by_parent_category": by_parent_cat,
             "count_by_status": by_status,
             "total_items": total_items,
             "recent_logs": InventoryLogSerializer(recent, many=True).data,
             "low_stock_items": InventoryItemSerializer(low_stock, many=True).data,
         }
         return Response(DashboardSerializer(instance=body).data)
+
+
+class AdminUserViewSet(viewsets.ModelViewSet):
+    queryset = User.objects.all().order_by("username")
+    serializer_class = AdminUserSerializer
+    permission_classes = [IsSuperuser]
+    http_method_names = ["get", "post", "put", "patch", "head", "options"]
+
+    @action(detail=True, methods=["post"], url_path="reset-password")
+    def reset_password(self, request, pk=None):
+        user = self.get_object()
+        temp_password = secrets.token_urlsafe(9)
+        user.set_password(temp_password)
+        user.save(update_fields=["password"])
+        return Response({"temporary_password": temp_password})
 
 
 class ExportItemsAPIView(APIView):
@@ -160,6 +225,7 @@ class ExportItemsAPIView(APIView):
 
 class ImportItemsAPIView(APIView):
     parser_classes = (MultiPartParser, FormParser)
+    permission_classes = [IsStaffOrSuperuserWriteOrReadOnly]
 
     def post(self, request):
         upload = request.FILES.get("file")
@@ -239,10 +305,6 @@ class ImportItemsAPIView(APIView):
         return by_name.first() if by_name.count() == 1 else None
 
 
-def serve_frontend(request, filename: str):
-    from django.conf import settings
-
-    path = settings.BASE_DIR / "static" / "pages" / filename
-    if not path.is_file():
-        raise Http404()
-    return FileResponse(path.open("rb"), content_type="text/html; charset=utf-8")
+def serve_frontend(request, template_name: str, context=None):
+    context = context or {}
+    return render(request, f"pages/{template_name}", context)

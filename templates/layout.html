@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <script>
+      (function() {
+        const collapsed = localStorage.getItem('sidebarCollapsed') === 'true';
+        if (collapsed) {
+          document.documentElement.classList.add('sidebar-collapsed');
+        }
+      })();
+    </script>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{% block title %}IMS{% endblock %}</title>
+    <link
+      href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css"
+      rel="stylesheet"
+    />
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css"
+    />
+    <link rel="stylesheet" href="/static/css/app.css" />
+    {% block head_extra %}{% endblock %}
+  </head>
+  <body>
+    {% if show_sidebar|default:True %}
+    <div class="app-shell" id="appShell">
+      <aside class="app-sidebar no-transition" id="appSidebar">
+        <div class="sidebar-inner">
+          <div class="sidebar-top">
+            <div class="sidebar-brand">
+              <span class="sidebar-brand-mark">IM</span>
+              <div class="sidebar-brand-name">
+                <div class="fw-semibold">Inventory IMS</div>
+                <div class="small text-white-50">Asset control</div>
+              </div>
+            </div>
+            <button class="sidebar-toggle" id="sidebarToggle" type="button" aria-label="Toggle sidebar">
+              <i class="bi" data-sidebar-toggle-icon></i>
+            </button>
+          </div>
+
+          <nav class="sidebar-nav">
+            <a class="sidebar-nav-link" href="/" data-nav="dashboard" data-tooltip="Dashboard">
+              <i class="bi bi-speedometer2 sidebar-icon"></i>
+              <span class="sidebar-label">Dashboard</span>
+            </a>
+
+            <div class="sidebar-inventory-row">
+              <div class="sidebar-inventory-head" data-nav="inventory">
+                <a class="inventory-head-main" href="/inventory.html" data-nav-link="inventory" data-tooltip="Inventory">
+                  <i class="bi bi-box-seam sidebar-icon"></i>
+                  <span class="sidebar-label">Inventory</span>
+                </a>
+                <button class="inventory-toggle-btn" type="button" id="inventoryTreeToggle" aria-label="Toggle categories">
+                  <i class="bi bi-chevron-down inventory-toggle-icon"></i>
+                </button>
+              </div>
+              <div class="sidebar-tree-expanded">
+                <div class="sidebar-tree-list" id="sidebarTreeExpanded"></div>
+              </div>
+              <div class="sidebar-tree-floating">
+                <div class="sidebar-tree-list" id="sidebarTreeFloating"></div>
+              </div>
+            </div>
+
+            <a class="sidebar-nav-link" href="/history.html" data-nav="history" data-tooltip="History / Audit Log">
+              <i class="bi bi-clock-history sidebar-icon"></i>
+              <span class="sidebar-label">History / Audit Log</span>
+            </a>
+
+            <a class="sidebar-nav-link" href="/settings.html" data-nav="settings" data-tooltip="Settings">
+              <i class="bi bi-gear sidebar-icon"></i>
+              <span class="sidebar-label">Settings</span>
+            </a>
+
+            <a class="sidebar-nav-link d-none" href="/admin-panel.html" id="sidebarAdminLink" data-nav="admin" data-tooltip="Administration">
+              <i class="bi bi-shield-lock sidebar-icon"></i>
+              <span class="sidebar-label">Administration</span>
+            </a>
+          </nav>
+
+          <div class="sidebar-footer">
+            <div class="sidebar-user" id="sidebarUser">
+              <span class="sidebar-user-avatar" id="sidebarUserAvatar">U</span>
+              <div class="sidebar-user-meta">
+                <div class="sidebar-user-name" id="sidebarUserName">User</div>
+                <div class="sidebar-user-label" id="sidebarUserRole">regular</div>
+              </div>
+              <button class="sidebar-logout" type="button" id="btnLogout" title="Logout" aria-label="Logout">
+                <i class="bi bi-box-arrow-right"></i>
+              </button>
+            </div>
+            <div class="sidebar-avatar-only">
+              <button class="sidebar-avatar-button" type="button" id="btnLogoutCompact" data-tooltip="Logout">U</button>
+            </div>
+          </div>
+        </div>
+      </aside>
+      <div class="sidebar-backdrop" id="sidebarBackdrop"></div>
+      <main class="app-main{% if full_width %} app-main-full{% endif %}">
+    {% else %}
+      <main class="app-main app-main-full">
+    {% endif %}
+        {% block page %}{% endblock %}
+      </main>
+    {% if show_sidebar|default:True %}
+    </div>
+    {% endif %}
+
+    <div class="toast-container position-fixed bottom-0 end-0 p-3">
+      <div id="toastLive" class="toast align-items-center border-0" role="alert">
+        <div class="d-flex">
+          <div class="toast-body"></div>
+        </div>
+      </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/axios@1.7.7/dist/axios.min.js"></script>
+    <script src="/static/js/api.js"></script>
+    {% block scripts %}{% endblock %}
+  </body>
+</html>

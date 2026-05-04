@@ -1,0 +1,160 @@
+{% extends "layout.html" %}
+{% block title %}Audit log — IMS{% endblock %}
+{% block page %}
+<div class="app-page">
+  <div class="page-actions">
+    <div>
+      <h1 class="h3 mb-1">Audit log</h1>
+      <p class="text-secondary mb-0">Filter recent inventory changes and operator activity.</p>
+    </div>
+  </div>
+  <div class="card card-soft shadow-sm mb-3">
+    <div class="card-body row g-2 small">
+      <div class="col-md-3">
+        <label class="form-label">Action</label>
+        <select class="form-select form-select-sm" id="fAction">
+          <option value="">Any</option>
+          <option value="added">added</option>
+          <option value="deployed">deployed</option>
+          <option value="returned">returned</option>
+          <option value="removed">removed</option>
+          <option value="faulty">faulty</option>
+          <option value="qty_changed">qty_changed</option>
+          <option value="remark_updated">remark_updated</option>
+        </select>
+      </div>
+      <div class="col-md-3">
+        <label class="form-label">Category</label>
+        <select class="form-select form-select-sm" id="fCat"></select>
+      </div>
+      <div class="col-md-3">
+        <label class="form-label">From (ISO)</label>
+        <input class="form-control form-control-sm" id="fFrom" placeholder="2026-01-01T00:00:00Z" />
+      </div>
+      <div class="col-md-3">
+        <label class="form-label">To (ISO)</label>
+        <input class="form-control form-control-sm" id="fTo" placeholder="2026-12-31T23:59:59Z" />
+      </div>
+      <div class="col-md-3">
+        <label class="form-label">User id</label>
+        <input class="form-control form-control-sm" id="fUser" placeholder="performed_by" />
+      </div>
+      <div class="col-12">
+        <button type="button" class="btn btn-sm btn-primary" id="btnApply">Apply filters</button>
+      </div>
+    </div>
+  </div>
+  <div class="content-panel p-3">
+    <div class="table-responsive" style="max-height: 75vh">
+      <table class="table table-sm table-hover align-middle mb-0">
+        <thead class="table-light sticky-top">
+          <tr>
+            <th>When</th>
+            <th>Action</th>
+            <th>Item</th>
+            <th>Category</th>
+            <th>Qty Δ</th>
+            <th>User</th>
+            <th>Notes</th>
+          </tr>
+        </thead>
+        <tbody id="tblBody"></tbody>
+      </table>
+    </div>
+    <nav class="mt-3" id="pager"></nav>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+  (function () {
+    ims.bootstrapPage({ activeNav: "history" }).then(function (boot) {
+      if (!boot) return;
+
+      function relApiUrl(fullUrl) {
+        if (!fullUrl) return null;
+        try {
+          var u = new URL(fullUrl, window.location.origin);
+          return u.pathname + u.search;
+        } catch (e) {
+          return fullUrl;
+        }
+      }
+
+      var nextUrl = null;
+      var prevUrl = null;
+
+      function load(url) {
+        ims.api.get(url || "/logs/?page_size=50&ordering=-timestamp").then(function (res) {
+          var d = res.data;
+          var rows = ims.results(d);
+          var tb = document.getElementById("tblBody");
+          tb.innerHTML = "";
+          rows.forEach(function (log) {
+            var tr = document.createElement("tr");
+            var spec = log.item ? log.item.specs : "—";
+            var cat = log.item && log.item.category ? (log.item.category.full_name || log.item.category.name) : "—";
+            var user = log.performed_by ? log.performed_by.username : "—";
+            tr.innerHTML =
+              "<td><small>" + new Date(log.timestamp).toLocaleString() + "</small></td><td>" +
+              log.action + "</td><td>" + spec + "</td><td>" + cat + "</td><td>" +
+              log.quantity_before + " → " + log.quantity_after + "</td><td>" + user +
+              "</td><td><small>" + (log.notes || "").replace(/</g, "&lt;") + "</small></td>";
+            tb.appendChild(tr);
+          });
+          nextUrl = d.next;
+          prevUrl = d.previous;
+          var pg = document.getElementById("pager");
+          pg.innerHTML =
+            '<button class="btn btn-sm btn-outline-secondary me-2" id="pgPrev" ' +
+            (prevUrl ? "" : "disabled") +
+            '>Previous</button><button class="btn btn-sm btn-outline-secondary" id="pgNext" ' +
+            (nextUrl ? "" : "disabled") +
+            ">Next</button>";
+          document.getElementById("pgPrev").onclick = function () {
+            var p = relApiUrl(prevUrl);
+            if (p) load(p);
+          };
+          document.getElementById("pgNext").onclick = function () {
+            var n = relApiUrl(nextUrl);
+            if (n) load(n);
+          };
+        }).catch(function () {
+          ims.showToast("Failed to load logs", "danger");
+        });
+      }
+
+      ims.api.get("/categories/").then(function (res) {
+        var sel = document.getElementById("fCat");
+        var o0 = document.createElement("option");
+        o0.value = "";
+        o0.textContent = "Any";
+        sel.appendChild(o0);
+        ims.results(res.data).forEach(function (c) {
+          var o = document.createElement("option");
+          o.value = c.id;
+          o.textContent = c.full_name || c.name;
+          sel.appendChild(o);
+        });
+      });
+
+      document.getElementById("btnApply").addEventListener("click", function () {
+        var q = "/logs/?page_size=50&ordering=-timestamp";
+        var a = document.getElementById("fAction").value;
+        var c = document.getElementById("fCat").value;
+        var f = document.getElementById("fFrom").value.trim();
+        var t = document.getElementById("fTo").value.trim();
+        var u = document.getElementById("fUser").value.trim();
+        if (a) q += "&action=" + encodeURIComponent(a);
+        if (c) q += "&category=" + encodeURIComponent(c);
+        if (f) q += "&timestamp_after=" + encodeURIComponent(f);
+        if (t) q += "&timestamp_before=" + encodeURIComponent(t);
+        if (u) q += "&performed_by=" + encodeURIComponent(u);
+        load(q);
+      });
+
+      load();
+    });
+  })();
+</script>
+{% endblock %}

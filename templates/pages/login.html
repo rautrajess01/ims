@@ -1,0 +1,54 @@
+{% extends "layout.html" %}
+{% block title %}Login — Inventory{% endblock %}
+{% block page %}
+<div class="container py-5">
+  <div class="row justify-content-center">
+    <div class="col-md-5 col-lg-4">
+      <div class="card shadow-sm">
+        <div class="card-body p-4">
+          <h1 class="h4 mb-3">Sign in</h1>
+          <form id="formLogin">
+            <div class="mb-3">
+              <label class="form-label">Username</label>
+              <input type="text" class="form-control" name="username" required autocomplete="username" />
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Password</label>
+              <input type="password" class="form-control" name="password" required autocomplete="current-password" />
+            </div>
+            <button type="submit" class="btn btn-primary w-100">Login</button>
+          </form>
+          <p class="text-danger small mt-3 mb-0 d-none" id="loginErr"></p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+  if (localStorage.getItem("ims_access")) {
+    window.location.href = "/";
+  }
+  document.getElementById("formLogin").addEventListener("submit", async function (e) {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    const err = document.getElementById("loginErr");
+    err.classList.add("d-none");
+    try {
+      const { data } = await axios.post("/api/v1/auth/login/", {
+        username: fd.get("username"),
+        password: fd.get("password"),
+      });
+      localStorage.setItem("ims_access", data.access);
+      localStorage.setItem("ims_refresh", data.refresh);
+      localStorage.setItem("ims_username", fd.get("username"));
+      await ims.loadCurrentUser(true);
+      window.location.href = "/";
+    } catch (ex) {
+      err.textContent = (ex.response && ex.response.data && ex.response.data.detail) || "Invalid credentials";
+      err.classList.remove("d-none");
+    }
+  });
+</script>
+{% endblock %}

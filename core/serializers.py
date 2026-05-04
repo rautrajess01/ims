@@ -6,20 +6,147 @@ from .models import Category, InventoryItem, InventoryLog
 User = get_user_model()
 
 
+def get_user_role(user):
+    if user.is_superuser:
+        return "superuser"
+    if user.is_staff:
+        return "staff"
+    return "regular"
+
+
 class UserBriefSerializer(serializers.ModelSerializer):
+    full_name = serializers.SerializerMethodField()
+    role = serializers.SerializerMethodField()
+
     class Meta:
         model = User
-        fields = ("id", "username", "first_name", "last_name", "email")
+        fields = ("id", "username", "first_name", "last_name", "full_name", "email", "role")
+
+    def get_full_name(self, obj):
+        return obj.get_full_name().strip()
+
+    def get_role(self, obj):
+        return get_user_role(obj)
+
+
+class CurrentUserSerializer(serializers.ModelSerializer):
+    full_name = serializers.SerializerMethodField()
+    role = serializers.SerializerMethodField()
+
+    class Meta:
+        model = User
+        fields = (
+            "id",
+            "username",
+            "email",
+            "first_name",
+            "last_name",
+            "full_name",
+            "is_active",
+            "is_staff",
+            "is_superuser",
+            "role",
+            "last_login",
+        )
+
+    def get_full_name(self, obj):
+        return obj.get_full_name().strip()
+
+    def get_role(self, obj):
+        return get_user_role(obj)
+
+
+class AdminUserSerializer(serializers.ModelSerializer):
+    full_name = serializers.SerializerMethodField()
+    role = serializers.SerializerMethodField()
+    role_input = serializers.CharField(write_only=True, required=False)
+    password = serializers.CharField(write_only=True, required=False, allow_blank=False, style={"input_type": "password"})
+    confirm_password = serializers.CharField(
+        write_only=True, required=False, allow_blank=False, style={"input_type": "password"}
+    )
+
+    class Meta:
+        model = User
+        fields = (
+            "id",
+            "username",
+            "email",
+            "first_name",
+            "last_name",
+            "full_name",
+            "role",
+            "role_input",
+            "is_active",
+            "is_staff",
+            "is_superuser",
+            "last_login",
+            "password",
+            "confirm_password",
+        )
+        read_only_fields = ("last_login", "is_staff", "is_superuser", "full_name", "role")
+
+    def get_full_name(self, obj):
+        return obj.get_full_name().strip()
+
+    def get_role(self, obj):
+        return get_user_role(obj)
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        role = attrs.pop("role_input", None)
+        password = attrs.pop("password", None)
+        confirm_password = attrs.pop("confirm_password", None)
+
+        if role is not None:
+            role = role.lower().strip()
+            if role not in {"superuser", "staff", "regular"}:
+                raise serializers.ValidationError({"role": "Role must be superuser, staff, or regular."})
+            attrs["_resolved_role"] = role
+
+        if self.instance is None and not password:
+            raise serializers.ValidationError({"password": "This field is required."})
+        if password is not None and password != confirm_password:
+            raise serializers.ValidationError({"confirm_password": "Password confirmation does not match."})
+        if password is not None:
+            attrs["_resolved_password"] = password
+        return attrs
+
+    def create(self, validated_data):
+        role = validated_data.pop("_resolved_role", "regular")
+        password = validated_data.pop("_resolved_password")
+        user = User(**validated_data)
+        self._apply_role(user, role)
+        user.set_password(password)
+        user.save()
+        return user
+
+    def update(self, instance, validated_data):
+        role = validated_data.pop("_resolved_role", None)
+        password = validated_data.pop("_resolved_password", None)
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        if role is not None:
+            self._apply_role(instance, role)
+        if password:
+            instance.set_password(password)
+        instance.save()
+        return instance
+
+    def _apply_role(self, user, role):
+        user.is_superuser = role == "superuser"
+        user.is_staff = role in {"superuser", "staff"}
 
 
 class CategorySerializer(serializers.ModelSerializer):
     parent = serializers.PrimaryKeyRelatedField(queryset=Category.objects.all(), allow_null=True, required=False)
     parent_name = serializers.SerializerMethodField()
-    full_name = serializers.SerializerMethodField()
+    full_name = serializers.ReadOnlyField()
+    depth = serializers.ReadOnlyField()
+    is_leaf = serializers.ReadOnlyField()
 
     class Meta:
         model = Category
-        fields = ("id", "name", "parent", "parent_name", "description", "full_name")
+        fields = ("id", "name", "parent", "parent_name", "description", "full_name", "depth", "is_leaf")
 
     def validate_parent(self, value):
         instance = getattr(self, "instance", None)
@@ -37,8 +164,58 @@ class CategorySerializer(serializers.ModelSerializer):
     def get_parent_name(self, obj):
         return obj.parent.name if obj.parent else None
 
-    def get_full_name(self, obj):
-        return obj.full_name
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        instance = getattr(self, "instance", None)
+        parent = attrs.get("parent", getattr(instance, "parent", None))
+
+        depth = 1
+        node = parent
+        while node is not None:
+            depth += 1
+            node = node.parent
+        if depth > Category.MAX_DEPTH:
+            raise serializers.ValidationError(
+                {"parent": f"Category hierarchy cannot exceed {Category.MAX_DEPTH} levels."}
+            )
+        if parent is not None and parent.items.exists():
+            raise serializers.ValidationError(
+                {"parent": "Cannot add a child under a category that already has items assigned."}
+            )
+        sibling_qs = Category.objects.filter(name=attrs.get("name", getattr(instance, "name", None)))
+        if parent is None:
+            sibling_qs = sibling_qs.filter(parent__isnull=True)
+        else:
+            sibling_qs = sibling_qs.filter(parent=parent)
+        if instance is not None:
+            sibling_qs = sibling_qs.exclude(pk=instance.pk)
+        if sibling_qs.exists():
+            raise serializers.ValidationError({"name": "A category with this name already exists at this level."})
+        if instance is not None and instance.items.exists():
+            parent_id = parent.pk if parent is not None else instance.pk
+            if Category.objects.filter(parent_id=parent_id).exclude(pk=instance.pk).exists():
+                raise serializers.ValidationError(
+                    "A category with assigned items cannot become or remain a parent category."
+                )
+        return attrs
+
+
+class CategoryTreeSerializer(serializers.ModelSerializer):
+    full_name = serializers.ReadOnlyField()
+    depth = serializers.ReadOnlyField()
+    is_leaf = serializers.ReadOnlyField()
+    item_count = serializers.SerializerMethodField()
+    children = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Category
+        fields = ("id", "name", "description", "full_name", "depth", "is_leaf", "item_count", "children")
+
+    def get_item_count(self, obj):
+        return obj.items.count() if not obj.children.exists() else 0
+
+    def get_children(self, obj):
+        return CategoryTreeSerializer(obj.children.all(), many=True).data
 
 
 class InventoryItemSerializer(serializers.ModelSerializer):
@@ -78,14 +255,20 @@ class InventoryItemWriteSerializer(serializers.ModelSerializer):
         if instance is None:
             status_val = attrs.get("status", InventoryItem.Status.IN_STOCK)
             deployed_to = attrs.get("deployed_to", "")
+            category = attrs.get("category")
         else:
             status_val = attrs.get("status", instance.status)
             deployed_to = attrs.get("deployed_to", instance.deployed_to)
+            category = attrs.get("category", instance.category)
         if status_val == InventoryItem.Status.DEPLOYED:
             if not (deployed_to and str(deployed_to).strip()):
                 raise serializers.ValidationError(
                     {"deployed_to": "This field is required when status is deployed."}
                 )
+        if category is not None and category.children.exists():
+            raise serializers.ValidationError(
+                {"category": "Inventory items can only be assigned to leaf categories."}
+            )
         return attrs
 
     def create(self, validated_data):
@@ -224,6 +407,23 @@ class InventoryLogSerializer(serializers.ModelSerializer):
         )
 
 
+class InventoryLogWriteSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = InventoryLog
+        fields = (
+            "item",
+            "action",
+            "quantity_before",
+            "quantity_after",
+            "deployed_to",
+            "notes",
+        )
+
+    def create(self, validated_data):
+        validated_data["performed_by"] = self.context["request"].user
+        return super().create(validated_data)
+
+
 class HistorySerializer(serializers.ModelSerializer):
     class Meta:
         model = InventoryItem.history.model
@@ -232,6 +432,7 @@ class HistorySerializer(serializers.ModelSerializer):
 
 class DashboardSerializer(serializers.Serializer):
     count_by_category = serializers.DictField(child=serializers.IntegerField())
+    count_by_parent_category = serializers.DictField(child=serializers.IntegerField())
     count_by_status = serializers.DictField(child=serializers.IntegerField())
     total_items = serializers.IntegerField()
     recent_logs = InventoryLogSerializer(many=True)

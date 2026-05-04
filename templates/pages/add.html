@@ -1,0 +1,99 @@
+{% extends "layout.html" %}
+{% block title %}Add item — IMS{% endblock %}
+{% block page %}
+<div class="app-page">
+  <div class="page-actions">
+    <div>
+      <h1 class="h3 mb-1">Add item</h1>
+      <p class="text-secondary mb-0">Create a new inventory record.</p>
+    </div>
+  </div>
+  <div class="card card-soft shadow-sm" style="max-width: 720px">
+    <div class="card-body p-4">
+      <form id="formItem">
+        <div class="mb-3">
+          <label class="form-label">Category</label>
+          <select class="form-select" name="category" required id="selCat"></select>
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Specs</label>
+          <input class="form-control" name="specs" required />
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Capacity</label>
+          <input class="form-control" name="capacity" />
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Quantity</label>
+          <input class="form-control" type="number" min="0" name="quantity" value="0" />
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Status</label>
+          <select class="form-select" name="status" id="selStatus">
+            <option value="in_stock">In stock</option>
+            <option value="deployed">Deployed</option>
+            <option value="out_of_stock">Out of stock</option>
+            <option value="na">N/A</option>
+            <option value="faulty">Faulty</option>
+          </select>
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Deployed to</label>
+          <input class="form-control" name="deployed_to" placeholder="Host / IP if deployed" />
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Remark</label>
+          <textarea class="form-control" name="remark" rows="2"></textarea>
+        </div>
+        <button type="submit" class="btn btn-primary">Save</button>
+        <a href="/inventory.html" class="btn btn-link">Cancel</a>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+  (function () {
+    ims.bootstrapPage({ activeNav: "inventory", requireWrite: true }).then(function (boot) {
+      if (!boot) return;
+      ims.getCategoryTree().then(function (tree) {
+        var sel = document.getElementById("selCat");
+        var groups = ims.collectLeafCategories(tree);
+        Object.keys(groups).forEach(function (groupName) {
+          var og = document.createElement("optgroup");
+          og.label = groupName;
+          groups[groupName].forEach(function (c) {
+            var o = document.createElement("option");
+            o.value = c.id;
+            o.textContent = c.label;
+            og.appendChild(o);
+          });
+          sel.appendChild(og);
+        });
+      });
+    });
+
+    document.getElementById("formItem").addEventListener("submit", function (e) {
+      e.preventDefault();
+      var fd = new FormData(e.target);
+      var payload = {
+        category: parseInt(fd.get("category"), 10),
+        specs: fd.get("specs"),
+        capacity: fd.get("capacity") || "",
+        quantity: parseInt(fd.get("quantity") || "0", 10),
+        status: fd.get("status"),
+        deployed_to: fd.get("deployed_to") || "",
+        remark: fd.get("remark") || "",
+      };
+      ims.api.post("/items/", payload).then(function (res) {
+        ims.showToast("Item created", "success");
+        window.location.href = "/item.html?id=" + res.data.id;
+      }).catch(function (ex) {
+        var msg = (ex.response && ex.response.data && JSON.stringify(ex.response.data)) || "Save failed";
+        ims.showToast(msg, "danger");
+      });
+    });
+  })();
+</script>
+{% endblock %}

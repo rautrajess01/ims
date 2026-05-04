@@ -1,0 +1,401 @@
+{% extends "layout.html" %}
+{% block title %}Administration — IMS{% endblock %}
+{% block page %}
+<div class="app-page">
+  <div class="page-actions">
+    <div>
+      <h1 class="h3 mb-1">Administration</h1>
+      <p class="text-secondary mb-0">Manage categories, users, and role-based access.</p>
+    </div>
+  </div>
+  <ul class="nav nav-tabs mb-3" id="adminTabs" role="tablist">
+    <li class="nav-item" role="presentation">
+      <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tabCategories" type="button">Category Management</button>
+    </li>
+    <li class="nav-item" role="presentation">
+      <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabUsers" type="button">User Management</button>
+    </li>
+    <li class="nav-item" role="presentation">
+      <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabAccess" type="button">Access & Permissions</button>
+    </li>
+  </ul>
+  <div class="tab-content">
+    <section class="tab-pane fade show active" id="tabCategories">
+      <div class="content-panel p-3 p-lg-4">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+          <div>
+            <h2 class="h5 mb-1">Categories</h2>
+            <p class="text-secondary mb-0">Categories are always loaded from the API tree.</p>
+          </div>
+          <button class="btn btn-primary" id="btnAddParentCategory" type="button">Add parent category</button>
+        </div>
+        <div id="categoryTreeAdmin"></div>
+      </div>
+    </section>
+    <section class="tab-pane fade" id="tabUsers">
+      <div class="content-panel p-3 p-lg-4">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+          <div>
+            <h2 class="h5 mb-1">Users</h2>
+            <p class="text-secondary mb-0">Create users, edit profiles, activate or deactivate accounts.</p>
+          </div>
+          <button class="btn btn-primary" id="btnAddUser" type="button">Add new user</button>
+        </div>
+        <div class="table-responsive">
+          <table class="table table-sm align-middle">
+            <thead class="table-light">
+              <tr>
+                <th>Username</th>
+                <th>Email</th>
+                <th>Full name</th>
+                <th>Role</th>
+                <th>Active</th>
+                <th>Last login</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="adminUsersBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+    <section class="tab-pane fade" id="tabAccess">
+      <div class="content-panel p-3 p-lg-4">
+        <div class="mb-3">
+          <h2 class="h5 mb-1">Role Access</h2>
+          <p class="text-secondary mb-0">Superuser: full access. Staff: inventory write access. Regular: read-only access.</p>
+        </div>
+        <div class="table-responsive">
+          <table class="table table-sm align-middle">
+            <thead class="table-light">
+              <tr>
+                <th>Username</th>
+                <th>Email</th>
+                <th>Current role</th>
+                <th>Change role</th>
+              </tr>
+            </thead>
+            <tbody id="adminRolesBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  </div>
+</div>
+
+<div class="modal fade" id="categoryModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <form id="categoryForm">
+        <div class="modal-header">
+          <h5 class="modal-title" id="categoryModalTitle">Category</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <input type="hidden" id="categoryId" />
+          <input type="hidden" id="categoryParentId" />
+          <div class="mb-3">
+            <label class="form-label">Name</label>
+            <input class="form-control" id="categoryName" required />
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Description</label>
+            <textarea class="form-control" id="categoryDescription" rows="3"></textarea>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-primary" type="submit">Save</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="userModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <form id="userForm">
+        <div class="modal-header">
+          <h5 class="modal-title" id="userModalTitle">User</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <input type="hidden" id="userId" />
+          <div class="row g-3">
+            <div class="col-md-6"><label class="form-label">Username</label><input class="form-control" id="userUsername" required /></div>
+            <div class="col-md-6"><label class="form-label">Email</label><input class="form-control" id="userEmail" type="email" /></div>
+            <div class="col-md-6"><label class="form-label">First name</label><input class="form-control" id="userFirstName" /></div>
+            <div class="col-md-6"><label class="form-label">Last name</label><input class="form-control" id="userLastName" /></div>
+            <div class="col-md-6"><label class="form-label">Password</label><input class="form-control" id="userPassword" type="password" /></div>
+            <div class="col-md-6"><label class="form-label">Confirm password</label><input class="form-control" id="userConfirmPassword" type="password" /></div>
+            <div class="col-md-6"><label class="form-label">Role</label><select class="form-select" id="userRole"><option value="superuser">Superuser</option><option value="staff">Staff</option><option value="regular">Regular</option></select></div>
+            <div class="col-md-6"><label class="form-label">Active</label><select class="form-select" id="userIsActive"><option value="true">Active</option><option value="false">Inactive</option></select></div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-primary" type="submit">Save</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="passwordModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Temporary password</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <p class="text-secondary">This password is shown once. Copy it now.</p>
+        <div class="alert alert-warning mb-0" id="tempPasswordValue">—</div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+  (function () {
+    var categoryModal;
+    var userModal;
+    var passwordModal;
+    var categoryTree = [];
+    var users = [];
+
+    function treeButton(label, icon, className, attrs) {
+      return '<button class="btn btn-sm ' + className + '" type="button" ' + attrs + '><i class="bi ' + icon + '"></i> ' + label + "</button>";
+    }
+
+    function renderCategoryTree() {
+      function renderNodes(nodes) {
+        return '<div class="d-grid gap-2">' + (nodes || []).map(function (node) {
+          return '<div class="border rounded-4 p-3"><div class="d-flex justify-content-between align-items-start gap-3"><div><div class="fw-semibold">' +
+            node.name + '</div><div class="small text-secondary">' + (node.description || "No description") +
+            '</div></div><div class="d-flex gap-2 flex-wrap">' +
+            treeButton("Add child", "bi-folder-plus", "btn-outline-primary", 'data-add-child="' + node.id + '"') +
+            treeButton("Edit", "bi-pencil", "btn-outline-secondary", 'data-edit-category="' + node.id + '"') +
+            treeButton("Delete", "bi-trash", "btn-outline-danger", 'data-delete-category="' + node.id + '"') +
+            "</div></div>" + ((node.children && node.children.length) ? '<div class="mt-3 ms-3">' + renderNodes(node.children) + "</div>" : "") + "</div>";
+        }).join("") + "</div>";
+      }
+
+      document.getElementById("categoryTreeAdmin").innerHTML = renderNodes(categoryTree);
+      document.querySelectorAll("[data-add-child]").forEach(function (btn) {
+        btn.addEventListener("click", function () { openCategoryModal("child", btn.getAttribute("data-add-child")); });
+      });
+      document.querySelectorAll("[data-edit-category]").forEach(function (btn) {
+        btn.addEventListener("click", function () { openCategoryModal("edit", btn.getAttribute("data-edit-category")); });
+      });
+      document.querySelectorAll("[data-delete-category]").forEach(function (btn) {
+        btn.addEventListener("click", function () { deleteCategory(btn.getAttribute("data-delete-category")); });
+      });
+    }
+
+    function renderUsers() {
+      var body = document.getElementById("adminUsersBody");
+      body.innerHTML = "";
+      users.forEach(function (user) {
+        var tr = document.createElement("tr");
+        tr.innerHTML =
+          "<td>" + user.username + "</td><td>" + (user.email || "—") + "</td><td>" + (user.full_name || "—") +
+          "</td><td>" + user.role + "</td><td>" + (user.is_active ? "Active" : "Inactive") + "</td><td>" +
+          (user.last_login ? new Date(user.last_login).toLocaleString() : "Never") +
+          '</td><td><div class="d-flex gap-2 flex-wrap"><button class="btn btn-sm btn-outline-secondary" data-edit-user="' +
+          user.id + '">Edit</button><button class="btn btn-sm btn-outline-warning" data-toggle-user="' + user.id + '">' +
+          (user.is_active ? "Deactivate" : "Activate") + '</button><button class="btn btn-sm btn-outline-danger" data-reset-password="' +
+          user.id + '">Reset password</button></div></td>';
+        body.appendChild(tr);
+      });
+      document.querySelectorAll("[data-edit-user]").forEach(function (btn) {
+        btn.addEventListener("click", function () { openUserModal(btn.getAttribute("data-edit-user")); });
+      });
+      document.querySelectorAll("[data-toggle-user]").forEach(function (btn) {
+        btn.addEventListener("click", function () { toggleUserActive(btn.getAttribute("data-toggle-user")); });
+      });
+      document.querySelectorAll("[data-reset-password]").forEach(function (btn) {
+        btn.addEventListener("click", function () { resetPassword(btn.getAttribute("data-reset-password")); });
+      });
+    }
+
+    function renderRoleTable() {
+      var body = document.getElementById("adminRolesBody");
+      body.innerHTML = "";
+      users.forEach(function (user) {
+        var tr = document.createElement("tr");
+        tr.innerHTML = "<td>" + user.username + "</td><td>" + (user.email || "—") + "</td><td>" + user.role +
+          '</td><td><select class="form-select form-select-sm" data-role-user="' + user.id + '"><option value="superuser">Superuser</option><option value="staff">Staff</option><option value="regular">Regular</option></select></td>';
+        body.appendChild(tr);
+        tr.querySelector("[data-role-user]").value = user.role;
+      });
+      document.querySelectorAll("[data-role-user]").forEach(function (select) {
+        select.addEventListener("change", function () {
+          ims.api.patch("/admin/users/" + select.getAttribute("data-role-user") + "/", {
+            role_input: select.value,
+          }).then(loadUsers).catch(function (ex) {
+            ims.showToast((ex.response && ex.response.data && JSON.stringify(ex.response.data)) || "Failed to update role", "danger");
+          });
+        });
+      });
+    }
+
+    function findCategoryById(nodes, id) {
+      var match = null;
+      (nodes || []).forEach(function (node) {
+        if (match) return;
+        if (String(node.id) === String(id)) match = node;
+        else match = findCategoryById(node.children || [], id) || match;
+      });
+      return match;
+    }
+
+    function openCategoryModal(mode, categoryId) {
+      var title = document.getElementById("categoryModalTitle");
+      document.getElementById("categoryForm").reset();
+      document.getElementById("categoryId").value = "";
+      document.getElementById("categoryParentId").value = "";
+      if (mode === "child") {
+        title.textContent = "Add child category";
+        document.getElementById("categoryParentId").value = categoryId;
+      } else if (mode === "edit") {
+        var category = findCategoryById(categoryTree, categoryId);
+        title.textContent = "Edit category";
+        document.getElementById("categoryId").value = categoryId;
+        if (category) {
+          document.getElementById("categoryName").value = category.name;
+          document.getElementById("categoryDescription").value = category.description || "";
+        }
+      } else {
+        title.textContent = "Add parent category";
+      }
+      categoryModal.show();
+    }
+
+    function openUserModal(userId) {
+      document.getElementById("userForm").reset();
+      document.getElementById("userId").value = "";
+      document.getElementById("userModalTitle").textContent = userId ? "Edit user" : "Add new user";
+      if (!userId) {
+        userModal.show();
+        return;
+      }
+      ims.api.get("/admin/users/" + userId + "/").then(function (res) {
+        var user = res.data;
+        document.getElementById("userId").value = user.id;
+        document.getElementById("userUsername").value = user.username;
+        document.getElementById("userEmail").value = user.email || "";
+        document.getElementById("userFirstName").value = user.first_name || "";
+        document.getElementById("userLastName").value = user.last_name || "";
+        document.getElementById("userRole").value = user.role;
+        document.getElementById("userIsActive").value = user.is_active ? "true" : "false";
+        userModal.show();
+      });
+    }
+
+    function loadCategories() {
+      return ims.getCategoryTree(true).then(function (tree) {
+        categoryTree = tree;
+        renderCategoryTree();
+      });
+    }
+
+    function loadUsers() {
+      return ims.api.get("/admin/users/?page_size=500").then(function (res) {
+        users = ims.results(res.data);
+        renderUsers();
+        renderRoleTable();
+      });
+    }
+
+    function deleteCategory(categoryId) {
+      if (!window.confirm("Delete this category?")) return;
+      ims.api.delete("/categories/" + categoryId + "/").then(function () {
+        ims.showToast("Category deleted", "success");
+        return loadCategories();
+      }).catch(function (ex) {
+        var data = ex.response && ex.response.data;
+        ims.showToast((data && (data.detail || JSON.stringify(data))) || "Delete failed", "danger");
+      });
+    }
+
+    function toggleUserActive(userId) {
+      var user = users.find(function (entry) { return String(entry.id) === String(userId); });
+      if (!user) return;
+      ims.api.patch("/admin/users/" + userId + "/", { is_active: !user.is_active }).then(function () {
+        ims.showToast("User updated", "success");
+        return loadUsers();
+      }).catch(function (ex) {
+        ims.showToast((ex.response && ex.response.data && JSON.stringify(ex.response.data)) || "Update failed", "danger");
+      });
+    }
+
+    function resetPassword(userId) {
+      ims.api.post("/admin/users/" + userId + "/reset-password/").then(function (res) {
+        document.getElementById("tempPasswordValue").textContent = res.data.temporary_password;
+        passwordModal.show();
+      });
+    }
+
+    ims.bootstrapPage({ activeNav: "admin", requireSuperuser: true }).then(function (boot) {
+      if (!boot) return;
+      categoryModal = bootstrap.Modal.getOrCreateInstance(document.getElementById("categoryModal"));
+      userModal = bootstrap.Modal.getOrCreateInstance(document.getElementById("userModal"));
+      passwordModal = bootstrap.Modal.getOrCreateInstance(document.getElementById("passwordModal"));
+
+      document.getElementById("btnAddParentCategory").addEventListener("click", function () { openCategoryModal("parent"); });
+      document.getElementById("btnAddUser").addEventListener("click", function () { openUserModal(null); });
+
+      document.getElementById("categoryForm").addEventListener("submit", function (e) {
+        e.preventDefault();
+        var categoryId = document.getElementById("categoryId").value;
+        var payload = {
+          name: document.getElementById("categoryName").value.trim(),
+          description: document.getElementById("categoryDescription").value.trim(),
+        };
+        var parentId = document.getElementById("categoryParentId").value;
+        if (parentId) payload.parent = parseInt(parentId, 10);
+        var request = categoryId ? ims.api.patch("/categories/" + categoryId + "/", payload) : ims.api.post("/categories/", payload);
+        request.then(function () {
+          ims.showToast("Category saved", "success");
+          categoryModal.hide();
+          return loadCategories();
+        }).catch(function (ex) {
+          ims.showToast((ex.response && ex.response.data && JSON.stringify(ex.response.data)) || "Category save failed", "danger");
+        });
+      });
+
+      document.getElementById("userForm").addEventListener("submit", function (e) {
+        e.preventDefault();
+        var userId = document.getElementById("userId").value;
+        var payload = {
+          username: document.getElementById("userUsername").value.trim(),
+          email: document.getElementById("userEmail").value.trim(),
+          first_name: document.getElementById("userFirstName").value.trim(),
+          last_name: document.getElementById("userLastName").value.trim(),
+          role_input: document.getElementById("userRole").value,
+          is_active: document.getElementById("userIsActive").value === "true",
+        };
+        var password = document.getElementById("userPassword").value;
+        var confirmPassword = document.getElementById("userConfirmPassword").value;
+        if (password) {
+          payload.password = password;
+          payload.confirm_password = confirmPassword;
+        }
+        var request = userId ? ims.api.put("/admin/users/" + userId + "/", payload) : ims.api.post("/admin/users/", payload);
+        request.then(function () {
+          ims.showToast("User saved", "success");
+          userModal.hide();
+          return loadUsers();
+        }).catch(function (ex) {
+          ims.showToast((ex.response && ex.response.data && JSON.stringify(ex.response.data)) || "User save failed", "danger");
+        });
+      });
+
+      Promise.all([loadCategories(), loadUsers()]).catch(function () {
+        ims.showToast("Failed to load administration data", "danger");
+      });
+    });
+  })();
+</script>
+{% endblock %}

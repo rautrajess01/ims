@@ -1,9 +1,12 @@
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.db import models
 from simple_history.models import HistoricalRecords
 
 
 class Category(models.Model):
+    MAX_DEPTH = 3
+
     name = models.CharField(max_length=128)
     parent = models.ForeignKey(
         "self",
@@ -25,6 +28,19 @@ class Category(models.Model):
         return self.full_name
 
     @property
+    def depth(self):
+        depth = 1
+        node = self.parent
+        while node is not None:
+            depth += 1
+            node = node.parent
+        return depth
+
+    @property
+    def is_leaf(self):
+        return not self.children.exists()
+
+    @property
     def full_name(self):
         parts = [self.name]
         node = self.parent
@@ -32,6 +48,44 @@ class Category(models.Model):
             parts.append(node.name)
             node = node.parent
         return " > ".join(reversed(parts))
+
+    def clean(self):
+        super().clean()
+        if self.parent_id == self.pk and self.pk is not None:
+            raise ValidationError({"parent": "A category cannot be its own parent."})
+
+        node = self.parent
+        depth = 1
+        while node is not None:
+            depth += 1
+            if node.pk == self.pk:
+                raise ValidationError({"parent": "Circular parent relationship is not allowed."})
+            node = node.parent
+
+        if depth > self.MAX_DEPTH:
+            raise ValidationError({"parent": f"Category hierarchy cannot exceed {self.MAX_DEPTH} levels."})
+
+        if self.parent_id and self.parent.items.exists():
+            raise ValidationError({"parent": "Cannot add a child under a category that already has items assigned."})
+
+        sibling_qs = Category.objects.filter(name=self.name)
+        if self.parent_id is None:
+            sibling_qs = sibling_qs.filter(parent__isnull=True)
+        else:
+            sibling_qs = sibling_qs.filter(parent_id=self.parent_id)
+        if self.pk:
+            sibling_qs = sibling_qs.exclude(pk=self.pk)
+        if sibling_qs.exists():
+            raise ValidationError({"name": "A category with this name already exists at this level."})
+
+        if self.pk and self.items.exists():
+            parent_id = self.parent_id if self.parent_id is not None else self.pk
+            if Category.objects.filter(parent_id=parent_id).exclude(pk=self.pk).exists():
+                raise ValidationError("A category with assigned items cannot become or remain a parent category.")
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        return super().save(*args, **kwargs)
 
 
 class InventoryItem(models.Model):
@@ -66,6 +120,15 @@ class InventoryItem(models.Model):
 
     def __str__(self):
         return f"{self.specs} ({self.category})"
+
+    def clean(self):
+        super().clean()
+        if self.category_id and self.category.children.exists():
+            raise ValidationError({"category": "Inventory items can only be assigned to leaf categories."})
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        return super().save(*args, **kwargs)
 
 
 class InventoryLog(models.Model):
