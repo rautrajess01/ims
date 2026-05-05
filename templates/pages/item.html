@@ -2,9 +2,11 @@
 {% block title %}Item — IMS{% endblock %}
 {% block page %}
 <div class="app-page">
-  <p class="mb-2"><a href="/inventory.html">← Back to inventory</a></p>
-  <div id="detailCard" class="card card-soft shadow-sm mb-4">
-    <div class="card-body p-4">
+  <div class="page-header">
+    <p class="mb-2"><a href="/inventory/">← Back to inventory</a></p>
+  </div>
+  <div class="page-shell">
+    <div id="detailCard" class="content-panel p-4">
       <h1 class="h4" id="titleSpecs">—</h1>
       <p class="text-secondary mb-1" id="titleCat">—</p>
       <div class="row g-2 small">
@@ -16,39 +18,41 @@
       <p class="mt-3 mb-0"><strong>Remark</strong><br /><span id="fRem">—</span></p>
       <a class="btn btn-primary btn-sm mt-3" id="btnEdit" href="#" data-requires-write>Edit</a>
     </div>
-  </div>
-  <div class="row g-4">
-    <div class="col-lg-6">
-      <div class="content-panel p-3 p-lg-4 h-100">
-        <div class="d-flex justify-content-between align-items-center mb-3">
-          <div>
-            <h2 class="h5 mb-1">Model history</h2>
-            <p class="text-secondary small mb-0">Snapshot trail for this item.</p>
+    <div class="row g-4">
+      <div class="col-lg-6">
+        <div class="content-panel p-3 p-lg-4 h-100">
+          <div class="d-flex justify-content-between align-items-center mb-3">
+            <div>
+              <h2 class="h5 mb-1">Item history</h2>
+              <p class="text-secondary small mb-0">Previous updates for this item.</p>
+            </div>
+          </div>
+          <div class="item-history-scroll">
+            <div class="timeline item-history-timeline" id="histTimeline"></div>
           </div>
         </div>
-        <div class="timeline item-history-timeline" id="histTimeline"></div>
       </div>
-    </div>
-    <div class="col-lg-6">
-      <div class="content-panel p-3 p-lg-4 h-100">
-        <div class="d-flex justify-content-between align-items-center mb-3">
-          <div>
-            <h2 class="h5 mb-1">Activity log</h2>
-            <p class="text-secondary small mb-0">Recorded actions and quantity changes.</p>
+      <div class="col-lg-6">
+        <div class="content-panel p-3 p-lg-4 h-100">
+          <div class="d-flex justify-content-between align-items-center mb-3">
+            <div>
+              <h2 class="h5 mb-1">Activity log</h2>
+              <p class="text-secondary small mb-0">Recorded actions and quantity changes.</p>
+            </div>
           </div>
-        </div>
-        <div class="table-responsive" style="max-height: 420px">
-          <table class="table table-sm align-middle mb-0 item-log-table">
-            <thead class="table-light sticky-top">
-              <tr>
-                <th>When</th>
-                <th>Action</th>
-                <th>Δ Qty</th>
-                <th>Note</th>
-              </tr>
-            </thead>
-            <tbody id="logBody"></tbody>
-          </table>
+          <div class="table-responsive" style="max-height: 420px">
+            <table class="table table-sm align-middle mb-0 item-log-table">
+              <thead class="table-light sticky-top">
+                <tr>
+                  <th>When</th>
+                  <th>Action</th>
+                  <th>Δ Qty</th>
+                  <th>Note</th>
+                </tr>
+              </thead>
+              <tbody id="logBody"></tbody>
+            </table>
+          </div>
         </div>
       </div>
     </div>
@@ -66,7 +70,7 @@
         ims.showToast("Missing id", "danger");
         return;
       }
-      document.getElementById("btnEdit").href = "/edit.html?id=" + id;
+      document.getElementById("btnEdit").href = "/edit/?id=" + id;
       Promise.all([
         ims.api.get("/items/" + id + "/"),
         ims.api.get("/items/" + id + "/history/?page_size=200"),
@@ -84,8 +88,8 @@
         (it.category.custom_fields || []).forEach(function (field) {
           var col = document.createElement("div");
           col.className = "col-md-3";
-          col.innerHTML = "<strong>" + (field.label || field.name) + "</strong><br /><span>" +
-            ims.formatCustomFieldValue(field, it.custom_values || {}) + "</span>";
+          col.innerHTML = "<strong>" + ims.escapeHtml(field.label || field.name) + "</strong><br /><span>" +
+            ims.escapeHtml(ims.formatCustomFieldValue(field, it.custom_values || {})) + "</span>";
           customSection.appendChild(col);
         });
         customSection.classList.toggle("d-none", !(it.category.custom_fields || []).length);
@@ -101,10 +105,10 @@
           div.innerHTML =
             '<div class="d-flex justify-content-between align-items-start gap-3">' +
             '<div><div class="small text-secondary text-uppercase item-history-eyebrow">Update</div>' +
-            '<div class="fw-semibold">' + when + '</div></div>' +
-            '<span class="item-history-qty">Qty ' + h.quantity + "</span></div>" +
+            '<div class="fw-semibold">' + ims.escapeHtml(when) + '</div></div>' +
+            '<span class="item-history-qty">Qty ' + ims.escapeHtml(h.quantity) + "</span></div>" +
             '<div class="mt-2">' + ims.statusBadge(h.status) + "</div>" +
-            (note ? '<div class="small text-secondary mt-2">' + note + "</div>" : "");
+            (note ? '<div class="small text-secondary mt-2">' + ims.escapeHtml(note) + "</div>" : "");
           ht.appendChild(div);
         });
 
@@ -116,14 +120,14 @@
           var actionLabel = String(log.action || "").replace(/_/g, " ");
           tr.innerHTML =
             '<td><div class="small text-secondary">Recorded</div><div class="fw-semibold">' +
-            new Date(log.timestamp).toLocaleString() +
+            ims.escapeHtml(new Date(log.timestamp).toLocaleString()) +
             "</div></td><td><span class=\"badge rounded-pill text-bg-light border text-dark text-capitalize\">" +
-            actionLabel +
+            ims.escapeHtml(actionLabel) +
             "</span></td><td><span class=\"item-history-qty\">" +
-            log.quantity_before +
+            ims.escapeHtml(log.quantity_before) +
             " → " +
-            log.quantity_after +
-            '</span></td><td><small>' + ((log.notes || "—").replace(/</g, "&lt;")) + "</small></td>";
+            ims.escapeHtml(log.quantity_after) +
+            '</span></td><td><small>' + ims.escapeHtml(log.notes || "—") + "</small></td>";
           lb.appendChild(tr);
         });
       }).catch(function () {

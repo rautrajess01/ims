@@ -3,6 +3,17 @@
   <head>
     <script>
       (function() {
+        const path = window.location.pathname;
+        const isLoginPage = path === '/login/';
+        const hasToken = !!localStorage.getItem('ims_access');
+        if (!isLoginPage && !hasToken) {
+          window.location.replace('/login/');
+          return;
+        }
+        if (isLoginPage && hasToken) {
+          window.location.replace('/');
+          return;
+        }
         const collapsed = localStorage.getItem('sidebarCollapsed') === 'true';
         if (collapsed) {
           document.documentElement.classList.add('sidebar-collapsed');
@@ -12,6 +23,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{% block title %}IMS{% endblock %}</title>
+    <link rel="icon" type="image/png" href="/static/favicon.png" />
     <link
       href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css"
       rel="stylesheet"
@@ -25,24 +37,17 @@
   </head>
   <body>
     <div class="ims-session-pill d-none" id="readOnlyPill">Read-only mode</div>
-    {% if show_sidebar|default:True %}
+    {% if show_sidebar|default:True and request.path != '/login/' %}
     <div class="app-shell" id="appShell">
       <aside class="app-sidebar no-transition" id="appSidebar">
         <div class="sidebar-inner">
-          <div class="sidebar-top">
-            <div class="sidebar-brand">
-              <span class="sidebar-brand-mark"><i class="bi bi-boxes"></i></span>
-              <div class="sidebar-brand-name">
-                <div class="fw-semibold">Inventory IMS</div>
-                <div class="small sidebar-brand-subtitle">Asset control</div>
-              </div>
-            </div>
-            <button class="sidebar-toggle" id="sidebarToggle" type="button" aria-label="Toggle sidebar">
-              <i class="bi" data-sidebar-toggle-icon></i>
-            </button>
-          </div>
-
           <nav class="sidebar-nav">
+            <div class="sidebar-brand-row">
+              <button class="sidebar-nav-link sidebar-brand-toggle" id="sidebarBrandToggle" type="button" aria-label="Toggle sidebar" data-tooltip="Menu">
+                <i class="bi bi-list sidebar-icon"></i>
+                <span class="sidebar-label">Menu</span>
+              </button>
+            </div>
             <a class="sidebar-nav-link" href="/" data-nav="dashboard" data-tooltip="Dashboard">
               <i class="bi bi-grid-1x2-fill sidebar-icon"></i>
               <span class="sidebar-label">Dashboard</span>
@@ -50,19 +55,24 @@
 
             <div class="sidebar-inventory-row">
               <div class="sidebar-inventory-head" data-nav="inventory">
-                <a class="inventory-head-main" href="/inventory.html" data-nav-link="inventory" data-tooltip="Inventory">
+                <a class="inventory-head-main" href="/inventory/" data-nav-link="inventory" data-tooltip="Inventory">
                   <i class="bi bi-archive-fill sidebar-icon"></i>
                   <span class="sidebar-label">Inventory</span>
                 </a>
+                <button class="inventory-toggle-btn" id="inventoryTreeToggle" type="button" aria-label="Toggle inventory categories">
+                  <i class="bi bi-chevron-down inventory-toggle-icon"></i>
+                </button>
               </div>
+              <div class="sidebar-tree-expanded" id="sidebarTreeExpanded"></div>
+              <div class="sidebar-tree-floating" id="sidebarTreeFloating"></div>
             </div>
 
-            <a class="sidebar-nav-link" href="/history.html" data-nav="history" data-tooltip="Logs">
+            <a class="sidebar-nav-link" href="/history/" data-nav="history" data-tooltip="Logs">
               <i class="bi bi-journal-richtext sidebar-icon"></i>
               <span class="sidebar-label">Logs</span>
             </a>
 
-            <a class="sidebar-nav-link d-none" href="/admin-panel.html" id="sidebarAdminLink" data-nav="admin" data-tooltip="Administration">
+            <a class="sidebar-nav-link d-none" href="/admin-panel/" id="sidebarAdminLink" data-nav="admin" data-tooltip="Administration">
               <i class="bi bi-sliders2-vertical sidebar-icon"></i>
               <span class="sidebar-label">Administration</span>
             </a>
@@ -92,7 +102,7 @@
     {% endif %}
         {% block page %}{% endblock %}
       </main>
-    {% if show_sidebar|default:True %}
+    {% if show_sidebar|default:True and request.path != '/login/' %}
     </div>
     {% endif %}
 

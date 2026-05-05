@@ -2,13 +2,13 @@
 {% block title %}Administration — IMS{% endblock %}
 {% block page %}
 <div class="app-page">
-  <div class="page-actions">
+  <div class="page-actions page-header">
     <div>
       <h1 class="h3 mb-1">Administration</h1>
       <p class="text-secondary mb-0">Manage categories, users, and role-based access.</p>
     </div>
   </div>
-  <ul class="nav nav-tabs mb-3" id="adminTabs" role="tablist">
+  <ul class="nav nav-tabs page-tabs mb-3" id="adminTabs" role="tablist">
     <li class="nav-item" role="presentation">
       <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tabCategories" type="button">Category Management</button>
     </li>
@@ -192,6 +192,15 @@
         .replace(/>/g, "&gt;");
     }
 
+    function escapeHtml(value) {
+      return String(value || "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+    }
+
     function renderCategoryTree() {
       var flatCategories = ims.flattenCategoryTree(categoryTree, []);
       function renderNodes(nodes) {
@@ -204,12 +213,10 @@
                 '<i class="bi ' + (isExpanded ? 'bi-chevron-down' : 'bi-chevron-right') + '"></i>' +
               "</button>"
             : "";
-          return '<div class="border rounded-4 p-3"><div class="d-flex justify-content-between align-items-start gap-3"><div><div class="fw-semibold">' +
-            (hasChildren ? '<span class="me-2">' + toggleButton + '</span>' : '') + node.name + '</div><div class="small text-secondary">' + (node.description || "No description") +
+          return '<div class="category-tree-card p-3"><div class="d-flex justify-content-between align-items-start gap-3"><div><div class="fw-semibold">' +
+            (hasChildren ? '<span class="me-2">' + toggleButton + '</span>' : '') + escapeHtml(node.name) + '</div><div class="small text-secondary">' + escapeHtml(node.description || "No description") +
             '</div><div class="small text-secondary mt-1">' + fieldCount + ' field' + (fieldCount === 1 ? '' : 's') + '</div></div><div class="d-flex gap-2 flex-wrap">' +
             treeButton("Add child", "bi-folder-plus", "btn-outline-primary", 'data-add-child="' + node.id + '"') +
-            treeButton("Move up", "bi-arrow-up-circle", "btn-outline-info", 'data-move-up="' + node.id + '"') +
-            treeButton("Move top", "bi-arrow-bar-up", "btn-outline-info", 'data-move-top="' + node.id + '"') +
             treeButton("Edit", "bi-pencil", "btn-outline-secondary", 'data-edit-category="' + node.id + '"') +
             treeButton("Delete", "bi-trash", "btn-outline-danger", 'data-delete-category="' + node.id + '"') +
             "</div></div>" + (hasChildren && isExpanded ? '<div class="mt-3 ms-3">' + renderNodes(node.children) + "</div>" : "") + "</div>";
@@ -233,13 +240,6 @@
       document.querySelectorAll("[data-delete-category]").forEach(function (btn) {
         btn.addEventListener("click", function () { deleteCategory(btn.getAttribute("data-delete-category")); });
       });
-      document.querySelectorAll("[data-move-up]").forEach(function (btn) {
-        btn.addEventListener("click", function () { moveCategoryUpOneLevel(btn.getAttribute("data-move-up")); });
-      });
-      document.querySelectorAll("[data-move-top]").forEach(function (btn) {
-        btn.addEventListener("click", function () { moveCategoryToTop(btn.getAttribute("data-move-top")); });
-      });
-
       var parentSelect = document.getElementById("categoryParentSelect");
       parentSelect.innerHTML = '<option value="">No parent (top level)</option>';
       flatCategories.forEach(function (cat) {
@@ -256,12 +256,12 @@
       users.forEach(function (user) {
         var tr = document.createElement("tr");
         tr.innerHTML =
-          "<td>" + user.username + "</td><td>" + (user.email || "—") + "</td><td>" + (user.full_name || "—") +
-          "</td><td>" + user.role + "</td><td>" + (user.is_active ? "Active" : "Inactive") + "</td><td>" +
-          (user.last_login ? new Date(user.last_login).toLocaleString() : "Never") +
+          "<td>" + escapeHtml(user.username) + "</td><td>" + escapeHtml(user.email || "—") + "</td><td>" + escapeHtml(user.full_name || "—") +
+          "</td><td>" + escapeHtml(user.role) + "</td><td>" + escapeHtml(user.is_active ? "Active" : "Inactive") + "</td><td>" +
+          escapeHtml(user.last_login ? new Date(user.last_login).toLocaleString() : "Never") +
           '</td><td><div class="d-flex gap-2 flex-wrap"><button class="btn btn-sm btn-outline-secondary" data-edit-user="' +
           user.id + '">Edit</button><button class="btn btn-sm btn-outline-warning" data-toggle-user="' + user.id + '">' +
-          (user.is_active ? "Deactivate" : "Activate") + '</button><button class="btn btn-sm btn-outline-danger" data-reset-password="' +
+          escapeHtml(user.is_active ? "Deactivate" : "Activate") + '</button><button class="btn btn-sm btn-outline-danger" data-reset-password="' +
           user.id + '">Reset password</button></div></td>';
         body.appendChild(tr);
       });
@@ -281,7 +281,7 @@
       body.innerHTML = "";
       users.forEach(function (user) {
         var tr = document.createElement("tr");
-        tr.innerHTML = "<td>" + user.username + "</td><td>" + (user.email || "—") + "</td><td>" + user.role +
+        tr.innerHTML = "<td>" + escapeHtml(user.username) + "</td><td>" + escapeHtml(user.email || "—") + "</td><td>" + escapeHtml(user.role) +
           '</td><td><select class="form-select form-select-sm" data-role-user="' + user.id + '"><option value="superuser">Superuser</option><option value="staff">Staff</option><option value="regular">Regular</option></select></td>';
         body.appendChild(tr);
         tr.querySelector("[data-role-user]").value = user.role;
@@ -427,31 +427,6 @@
       }).catch(function (ex) {
         var data = ex.response && ex.response.data;
         ims.showToast((data && (data.detail || JSON.stringify(data))) || "Delete failed", "danger");
-      });
-    }
-
-    function moveCategoryUpOneLevel(categoryId) {
-      var category = findCategoryById(categoryTree, categoryId);
-      if (!category || !category.parent) {
-        ims.showToast("Category is already at top level", "warning");
-        return;
-      }
-      var parent = findCategoryById(categoryTree, category.parent);
-      var nextParent = parent && parent.parent ? parent.parent : null;
-      ims.api.patch("/categories/" + categoryId + "/", { parent: nextParent }).then(function () {
-        ims.showToast("Category moved", "success");
-        return loadCategories();
-      }).catch(function (ex) {
-        ims.showToast((ex.response && ex.response.data && JSON.stringify(ex.response.data)) || "Move failed", "danger");
-      });
-    }
-
-    function moveCategoryToTop(categoryId) {
-      ims.api.patch("/categories/" + categoryId + "/", { parent: null }).then(function () {
-        ims.showToast("Category moved to top level", "success");
-        return loadCategories();
-      }).catch(function (ex) {
-        ims.showToast((ex.response && ex.response.data && JSON.stringify(ex.response.data)) || "Move failed", "danger");
       });
     }
 

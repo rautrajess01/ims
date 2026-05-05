@@ -39,7 +39,7 @@
           } catch (_) {}
         }
         clearSession();
-        if (window.location.pathname !== "/login/" && !window.location.pathname.endsWith("login.html")) {
+        if (window.location.pathname !== "/login/") {
           window.location.href = "/login/";
         }
       }
@@ -90,6 +90,15 @@
     };
     var data = map[status] || [status, "secondary"];
     return '<span class="badge text-bg-' + data[1] + '">' + data[0] + "</span>";
+  }
+
+  function escapeHtml(value) {
+    return String(value === undefined || value === null ? "" : value)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
   }
 
   function requireAuth() {
@@ -381,6 +390,13 @@
         })
         .catch(function (err) {
           currentUserPromise = null;
+          if (err && err.response && err.response.status === 401) {
+            clearSession();
+            var path = window.location.pathname;
+            if (path !== "/login/") {
+              window.location.href = "/login/";
+            }
+          }
           throw err;
         });
     }
@@ -446,10 +462,10 @@
 
   function detectActiveNav() {
     var path = window.location.pathname || "/";
-    if (path === "/" || path.endsWith("/index.html")) return "dashboard";
-    if (path.endsWith("/inventory.html")) return "inventory";
-    if (path.endsWith("/history.html")) return "history";
-    if (path.endsWith("/admin-panel.html")) return "admin";
+    if (path === "/") return "dashboard";
+    if (path === "/inventory/") return "inventory";
+    if (path === "/history/") return "history";
+    if (path === "/admin-panel/") return "admin";
     return "";
   }
 
@@ -462,10 +478,10 @@
     var modal = bootstrap.Modal.getOrCreateInstance(modalEl);
     var commands = [
       { label: "Go to Dashboard", hint: "Page", action: function () { window.location.href = "/"; } },
-      { label: "Go to Inventory", hint: "Page", action: function () { window.location.href = "/inventory.html"; } },
-      { label: "Go to Logs", hint: "Page", action: function () { window.location.href = "/history.html"; } },
-      { label: "Add Item", hint: "Action", action: function () { window.location.href = "/add.html"; }, requiresWrite: true },
-      { label: "Open Administration", hint: "Page", action: function () { window.location.href = "/admin-panel.html"; }, requiresSuperuser: true },
+      { label: "Go to Inventory", hint: "Page", action: function () { window.location.href = "/inventory/"; } },
+      { label: "Go to Logs", hint: "Page", action: function () { window.location.href = "/history/"; } },
+      { label: "Add Item", hint: "Action", action: function () { window.location.href = "/add/"; }, requiresWrite: true },
+      { label: "Open Administration", hint: "Page", action: function () { window.location.href = "/admin-panel/"; }, requiresSuperuser: true },
       { label: "Toggle Sidebar", hint: "Action", action: function () {
         var asideToggle = document.getElementById("sidebarToggle");
         if (asideToggle) asideToggle.click();
@@ -552,7 +568,7 @@
       var userRoleEl = document.getElementById("sidebarUserRole");
       var userAvatarEl = document.getElementById("sidebarUserAvatar");
       var compactLogoutEl = document.getElementById("btnLogoutCompact");
-      var toggleIcon = aside.querySelector("[data-sidebar-toggle-icon]");
+      var brandToggle = aside.querySelector("#sidebarBrandToggle");
       var inventoryHead = aside.querySelector(".sidebar-inventory-head");
       var inventoryMain = aside.querySelector(".inventory-head-main");
 
@@ -633,10 +649,6 @@
       function updateShellState() {
         var collapsed = getSidebarCollapsed();
         document.documentElement.classList.toggle("sidebar-collapsed", collapsed);
-        if (toggleIcon) {
-          toggleIcon.className =
-            "bi " + (collapsed && !isMobileSidebar() ? "bi-arrow-right-circle-fill" : "bi-arrow-left-circle-fill");
-        }
       }
 
       function renderSidebar() {
@@ -685,7 +697,7 @@
             var categoryId = String(btn.getAttribute("data-category-id"));
             activeCategoryId = categoryId;
             if (typeof options.onCategorySelect === "function") options.onCategorySelect(categoryId);
-            else window.location.href = "/inventory.html?category=" + encodeURIComponent(categoryId);
+            else window.location.href = "/inventory/?category=" + encodeURIComponent(categoryId);
             if (isMobileSidebar()) setMobileOpen(false);
             renderSidebar();
           };
@@ -713,14 +725,27 @@
         });
       });
 
-      aside.querySelector("#sidebarToggle").addEventListener("click", function () {
-        if (isMobileSidebar()) {
-          setMobileOpen(!mobileOpen);
-          return;
+      if (brandToggle) {
+        function toggleFromBrand() {
+          if (isMobileSidebar()) {
+            setMobileOpen(!mobileOpen);
+            return;
+          }
+          setSidebarCollapsed(!getSidebarCollapsed());
+          updateShellState();
         }
-        setSidebarCollapsed(!getSidebarCollapsed());
-        updateShellState();
-      });
+
+        brandToggle.addEventListener("click", function () {
+          toggleFromBrand();
+        });
+
+        brandToggle.addEventListener("keydown", function (e) {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            toggleFromBrand();
+          }
+        });
+      }
 
       var inventoryTreeToggle = aside.querySelector("#inventoryTreeToggle");
       if (inventoryTreeToggle) {
@@ -805,6 +830,7 @@
     api: raw,
     results: results,
     showToast: showToast,
+    escapeHtml: escapeHtml,
     queueToast: queueToast,
     consumeQueuedToast: consumeQueuedToast,
     statusBadge: statusBadge,

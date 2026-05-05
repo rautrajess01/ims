@@ -2,14 +2,13 @@
 {% block title %}Edit item — IMS{% endblock %}
 {% block page %}
 <div class="app-page">
-  <div class="page-actions">
+  <div class="page-actions page-header">
     <div>
       <h1 class="h3 mb-1">Edit item</h1>
       <p class="text-secondary mb-0">Update an existing inventory record.</p>
     </div>
   </div>
-  <div class="card card-soft shadow-sm" style="max-width: 720px">
-    <div class="card-body p-4">
+  <div class="content-panel p-4" style="max-width: 720px">
       <form id="formItem">
         <div class="mb-3">
           <label class="form-label">Category</label>
@@ -41,9 +40,8 @@
           <textarea class="form-control" name="log_note" rows="2" placeholder="Moved to this location, corrected stock count, returned from deployment, etc."></textarea>
         </div>
         <button type="submit" class="btn btn-primary">Update</button>
-        <a href="/inventory.html" class="btn btn-link">Cancel</a>
+        <a href="/inventory/" class="btn btn-link">Cancel</a>
       </form>
-    </div>
   </div>
 </div>
 {% endblock %}
@@ -108,7 +106,7 @@
       };
       ims.api.patch("/items/" + id + "/", payload).then(function () {
         ims.showToast("Saved", "success");
-        window.location.href = "/item.html?id=" + id;
+        window.location.href = "/item/?id=" + id;
       }).catch(function (ex) {
         var msg = (ex.response && ex.response.data && JSON.stringify(ex.response.data)) || "Save failed";
         ims.showToast(msg, "danger");

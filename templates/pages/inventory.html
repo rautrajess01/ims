@@ -2,13 +2,13 @@
 {% block title %}Inventory — IMS{% endblock %}
 {% block page %}
 <div class="app-page">
-  <div class="page-actions">
+  <div class="page-actions page-header">
     <div>
       <h1 class="h3 mb-1">Inventory</h1>
       <p class="text-secondary mb-0">Browse stock by category and filter by search text.</p>
     </div>
     <div class="page-actions-group">
-      <a class="btn btn-primary" href="/add.html" data-requires-write>Add item</a>
+      <a class="btn btn-primary" href="/add/" data-requires-write>Add item</a>
     </div>
   </div>
   <div class="content-panel p-3 p-lg-4">
@@ -124,7 +124,7 @@
       head.innerHTML = "";
       ["Category"].concat(schema.map(function (field) {
         return field.label || field.name;
-      })).concat(["Qty", "Status", "Remark", "Updated", ""]).forEach(function (label) {
+      })).concat(["Qty", "Status", "Updated", ""]).forEach(function (label) {
         var th = document.createElement("th");
         th.textContent = label;
         head.appendChild(th);
@@ -136,7 +136,7 @@
       tb.innerHTML = "";
       var q = (document.getElementById("searchQ").value || "").toLowerCase();
       var schema = getActiveSchema();
-      var colCount = 6 + schema.length;
+      var colCount = 5 + schema.length;
       renderTableHead(schema);
 
       allItems.forEach(function (it) {
@@ -148,22 +148,21 @@
         if (q && buildSearchBlob(it).indexOf(q) < 0) return;
 
         var tr = document.createElement("tr");
-        var actions = '<a class="btn btn-sm btn-outline-primary" href="/item.html?id=' + it.id + '">View</a>';
+        var actions = '<a class="btn btn-sm btn-outline-primary" href="/item/?id=' + it.id + '">View</a>';
         if (ims.canManageInventory(currentUser)) {
-          actions += ' <a class="btn btn-sm btn-outline-secondary" href="/edit.html?id=' + it.id + '">Edit</a>';
+          actions += ' <a class="btn btn-sm btn-outline-secondary" href="/edit/?id=' + it.id + '">Edit</a>';
           actions += ' <button class="btn btn-sm btn-outline-success" type="button" data-quick-edit="' + it.id + '">Quick update</button>';
         }
         var cells = [
-          "<td><small>" + ((it.category && (it.category.full_name || it.category.name)) || "—") + "</small></td>",
+          "<td><small>" + ims.escapeHtml((it.category && (it.category.full_name || it.category.name)) || "—") + "</small></td>",
         ];
         schema.forEach(function (field) {
           cells.push("<td>" + ims.formatCustomFieldValue(field, it.custom_values || {}) + "</td>");
         });
         cells = cells.concat([
-          "<td>" + it.quantity + "</td>",
+          "<td>" + ims.escapeHtml(it.quantity) + "</td>",
           "<td>" + ims.statusBadge(it.status) + "</td>",
-          "<td><small>" + (it.remark || "—") + "</small></td>",
-          "<td><small>" + (it.last_updated ? new Date(it.last_updated).toLocaleString() : "—") + "</small></td>",
+          "<td><small>" + ims.escapeHtml(it.last_updated ? new Date(it.last_updated).toLocaleString() : "—") + "</small></td>",
           "<td>" + actions + "</td>",
         ]);
         tr.innerHTML = cells.join("");
@@ -202,7 +201,7 @@
       });
     }
 
-    ims.bootstrapPage({ activeNav: "inventory" }).then(function (boot) {
+    ims.bootstrapPage({ activeNav: "inventory", skipSidebar: true }).then(function (boot) {
       if (!boot) return;
       currentUser = boot.user;
       return Promise.all([ims.getCategoryTree(), ims.getInventoryItems()]).then(function (res) {

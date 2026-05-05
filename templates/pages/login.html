@@ -1,27 +1,27 @@
 {% extends "layout.html" %}
-{% block title %}Login — Inventory{% endblock %}
+{% block title %}Login — Subisu IMS{% endblock %}
 {% block page %}
-<div class="container py-5">
-  <div class="row justify-content-center">
-    <div class="col-md-5 col-lg-4">
-      <div class="card shadow-sm">
-        <div class="card-body p-4">
-          <h1 class="h4 mb-3">Sign in</h1>
-          <form id="formLogin">
-            <div class="mb-3">
-              <label class="form-label">Username</label>
-              <input type="text" class="form-control" name="username" required autocomplete="username" />
-            </div>
-            <div class="mb-3">
-              <label class="form-label">Password</label>
-              <input type="password" class="form-control" name="password" required autocomplete="current-password" />
-            </div>
-            <button type="submit" class="btn btn-primary w-100">Login</button>
-          </form>
-          <p class="text-danger small mt-3 mb-0 d-none" id="loginErr"></p>
-        </div>
+<div class="login-page">
+  <div class="login-card">
+    <section class="login-card-panel login-form-panel">
+      <div class="text-center mb-4">
+        <span class="login-logo mb-3"><i class="bi bi-boxes"></i></span>
+        <div class="small text-secondary fw-semibold mb-2">Subisu System</div>
+        <h1 class="h3 mb-2">Sign in</h1>
       </div>
-    </div>
+      <form id="formLogin">
+        <div class="mb-3">
+          <label class="form-label">Username</label>
+          <input type="text" class="form-control" name="username" required autocomplete="username" />
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Password</label>
+          <input type="password" class="form-control" name="password" required autocomplete="current-password" />
+        </div>
+        <button type="submit" class="btn login-submit text-white w-100">Login</button>
+      </form>
+      <p class="login-error text-danger small mt-3 mb-0 d-none" id="loginErr"></p>
+    </section>
   </div>
 </div>
 {% endblock %}

@@ -1,4 +1,5 @@
 from django.urls import include, path
+from django.views.generic import RedirectView
 from rest_framework.routers import DefaultRouter
 
 from .views import (
@@ -37,14 +38,20 @@ api_v1_patterns = [
 
 urlpatterns = [
     path("api/v1/", include(api_v1_patterns)),
-    path("index.html", lambda request: serve_frontend(request, "index.html")),
     path("", lambda request: serve_frontend(request, "index.html")),
+    path("inventory/", lambda request: serve_frontend(request, "inventory.html")),
+    path("item/", lambda request: serve_frontend(request, "item.html")),
+    path("add/", lambda request: serve_frontend(request, "add.html")),
+    path("edit/", lambda request: serve_frontend(request, "edit.html")),
+    path("history/", lambda request: serve_frontend(request, "history.html")),
+    path("admin-panel/", lambda request: serve_frontend(request, "admin-panel.html")),
     path("login/", lambda request: serve_frontend(request, "login.html", {"show_sidebar": False})),
-    path("login.html", lambda request: serve_frontend(request, "login.html", {"show_sidebar": False})),
-    path("inventory.html", lambda request: serve_frontend(request, "inventory.html")),
-    path("item.html", lambda request: serve_frontend(request, "item.html")),
-    path("add.html", lambda request: serve_frontend(request, "add.html")),
-    path("edit.html", lambda request: serve_frontend(request, "edit.html")),
-    path("history.html", lambda request: serve_frontend(request, "history.html")),
-    path("admin-panel.html", lambda request: serve_frontend(request, "admin-panel.html")),
+    path("index.html", RedirectView.as_view(url="/", permanent=False)),
+    path("login.html", RedirectView.as_view(url="/login/", permanent=False)),
+    path("inventory.html", RedirectView.as_view(url="/inventory/", permanent=False)),
+    path("item.html", RedirectView.as_view(url="/item/", permanent=False)),
+    path("add.html", RedirectView.as_view(url="/add/", permanent=False)),
+    path("edit.html", RedirectView.as_view(url="/edit/", permanent=False)),
+    path("history.html", RedirectView.as_view(url="/history/", permanent=False)),
+    path("admin-panel.html", RedirectView.as_view(url="/admin-panel/", permanent=False)),
 ]
