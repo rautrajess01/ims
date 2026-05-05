@@ -42,6 +42,39 @@
     </div>
   </div>
 </div>
+
+<div class="modal fade" id="manageGroupModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <div>
+          <h5 class="modal-title mb-0">Manage items</h5>
+          <div class="text-secondary small" id="manageGroupSubtitle"></div>
+        </div>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <div class="table-responsive">
+          <table class="table table-sm align-middle mb-0">
+            <thead class="table-light">
+              <tr>
+                <th>Item</th>
+                <th>Qty</th>
+                <th>Status</th>
+                <th>Remark</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="manageGroupBody"></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
 {% endblock %}
 {% block scripts %}
 <script>
@@ -54,6 +87,7 @@
     var sidebarApi = null;
     var searchTimer = null;
     var currentUser = null;
+    var manageModal = null;
 
     function syncUrl() {
       var next = new URL(window.location.href);
@@ -90,6 +124,19 @@
       ).toLowerCase();
     }
 
+    function resolveGroupLabel(item) {
+      if (!item) return "";
+      var schema = (item.category && item.category.custom_fields) ? item.category.custom_fields : [];
+      var values = item.custom_values || {};
+      for (var i = 0; i < schema.length; i += 1) {
+        var field = schema[i];
+        var v = values[field.name];
+        if (v !== undefined && v !== null && String(v).trim() !== "") return String(v).trim();
+      }
+      // Fallback to API-provided display_name
+      return String(item.display_name || "").trim();
+    }
+
     function renderCategoryFilterOptions() {
       var select = document.getElementById("categoryFilterSelect");
       var groups = ims.collectLeafCategories(categoryTree);
@@ -100,7 +147,7 @@
         groups[groupName].forEach(function (category) {
           var option = document.createElement("option");
           option.value = category.id;
-          option.textContent = category.full_name;
+          option.textContent = ims.formatCategoryLeaf(category);
           optgroup.appendChild(option);
         });
         select.appendChild(optgroup);
@@ -111,23 +158,13 @@
     function renderTableHead() {
       var head = document.getElementById("tableHeadRow");
       head.innerHTML = "";
-      ["Path", "Stock", "Item rows", "Updated"].forEach(function (label) {
+      var labels = ["Category", "Group", "Stock", "Items", "Updated"];
+      if (currentUser && ims.canManageInventory(currentUser)) labels.push("Actions");
+      labels.forEach(function (label) {
         var th = document.createElement("th");
         th.textContent = label;
         head.appendChild(th);
       });
-    }
-
-    function formatCategoryPath(category) {
-      var path = category && (category.full_name || category.name);
-      return path ? path.split(" > ").join("/") + "/" : "—";
-    }
-
-    function formatGroupedPath(item) {
-      var categoryPath = formatCategoryPath(item.category);
-      var itemName = (item.display_name || "").trim();
-      if (!itemName || itemName.indexOf("Item #") === 0 || itemName === "Inventory item") return categoryPath;
-      return categoryPath + itemName + "/";
     }
 
     function buildGroupedRows() {
@@ -142,10 +179,13 @@
 
         if (q && buildSearchBlob(it).indexOf(q) < 0) return;
 
-        var key = String(it.category.id) + "::" + String((it.display_name || "").trim()).toLowerCase();
+        var groupLabel = resolveGroupLabel(it);
+        var key = String(it.category.id) + "::" + String(groupLabel).trim().toLowerCase();
         if (!grouped[key]) {
           grouped[key] = {
-            groupedPath: formatGroupedPath(it),
+            categoryId: String(it.category.id),
+            categoryPath: ims.formatCategoryLeaf(it.category),
+            groupLabel: String(groupLabel || "").trim(),
             quantity: 0,
             itemRows: 0,
             lastUpdated: it.last_updated || null,
@@ -163,25 +203,83 @@
       return Object.keys(grouped).map(function (key) {
         return grouped[key];
       }).sort(function (a, b) {
-        return a.groupedPath.localeCompare(b.groupedPath);
+        var aKey = (a.categoryPath || "") + " / " + (a.groupLabel || "");
+        var bKey = (b.categoryPath || "") + " / " + (b.groupLabel || "");
+        return aKey.localeCompare(bKey);
       });
+    }
+
+    function findMatchingItems(row) {
+      var targetCat = String(row.categoryId);
+      var targetGroup = String(row.groupLabel || "").trim().toLowerCase();
+      return (allItems || []).filter(function (it) {
+        if (!it.category || String(it.category.id) !== targetCat) return false;
+        return resolveGroupLabel(it).toLowerCase() === targetGroup;
+      });
+    }
+
+    function openManageModal(row) {
+      if (!manageModal) manageModal = bootstrap.Modal.getOrCreateInstance(document.getElementById("manageGroupModal"));
+      var subtitle = document.getElementById("manageGroupSubtitle");
+      subtitle.textContent = (row.categoryPath || "—") + " / " + (row.groupLabel || "—");
+
+      var items = findMatchingItems(row);
+      if (items.length === 1) {
+        window.location.href = "/edit/?id=" + encodeURIComponent(items[0].id);
+        return;
+      }
+
+      var body = document.getElementById("manageGroupBody");
+      body.innerHTML = "";
+      items.forEach(function (it) {
+        var tr = document.createElement("tr");
+        var itemLabel = ims.formatItemPath(it);
+        tr.innerHTML = [
+          "<td><a href=\"/item/?id=" + encodeURIComponent(it.id) + "\">" + ims.escapeHtml(itemLabel) + "</a></td>",
+          "<td>" + ims.escapeHtml(it.quantity) + "</td>",
+          "<td>" + ims.statusBadge(it.status) + "</td>",
+          "<td><small class=\"text-secondary\">" + ims.escapeHtml(it.remark || "—") + "</small></td>",
+          "<td class=\"text-end\"><a class=\"btn btn-sm btn-primary\" href=\"/edit/?id=" + encodeURIComponent(it.id) + "\" data-requires-write>Edit</a></td>",
+        ].join("");
+        body.appendChild(tr);
+      });
+      if (!items.length) {
+        if (window.imsUi) window.imsUi.setEmptyRow(body, 5, "No items found for this group.");
+        else body.innerHTML = '<tr><td colspan="5" class="text-center text-secondary p-3">No items found for this group.</td></tr>';
+      }
+      if (items.length) ims.applyPermissionVisibility(document.getElementById("manageGroupModal"), currentUser);
+      manageModal.show();
     }
 
     function renderRows() {
       var tb = document.getElementById("tblBody");
       tb.innerHTML = "";
       var groupedRows = buildGroupedRows();
-      var colCount = 4;
+      var colCount = (currentUser && ims.canManageInventory(currentUser)) ? 6 : 5;
       renderTableHead();
 
       groupedRows.forEach(function (row) {
         var tr = document.createElement("tr");
-        tr.innerHTML = [
-          "<td><small>" + ims.escapeHtml(row.groupedPath) + "</small></td>",
+        var cells = [
+          "<td><small>" + ims.escapeHtml(row.categoryPath || "—") + "</small></td>",
+          "<td>" + ims.escapeHtml(row.groupLabel || "—") + "</td>",
           "<td>" + ims.escapeHtml(row.quantity) + "</td>",
-          "<td>" + ims.escapeHtml(row.itemRows) + "</td>",
+          "<td><small class=\"text-secondary\">" + ims.escapeHtml(row.itemRows) + "</small></td>",
           "<td><small>" + ims.escapeHtml(row.lastUpdated ? new Date(row.lastUpdated).toLocaleString() : "—") + "</small></td>",
-        ].join("");
+        ];
+        if (currentUser && ims.canManageInventory(currentUser)) {
+          cells.push('<td class="text-end"><button class="btn btn-sm btn-outline-primary" type="button" data-manage-row="1">Manage</button></td>');
+        }
+        tr.innerHTML = cells.join("");
+        if (currentUser && ims.canManageInventory(currentUser)) {
+          tr.querySelectorAll("[data-manage-row]").forEach(function (btn) {
+            btn.addEventListener("click", function (e) {
+              e.preventDefault();
+              e.stopPropagation();
+              openManageModal(row);
+            });
+          });
+        }
         tb.appendChild(tr);
       });
 
@@ -200,6 +298,7 @@
         allItems = res[1];
         descendantsById = ims.buildCategoryIndexes(categoryTree).descendantsById;
         renderCategoryFilterOptions();
+        // Materialize category id inside grouped rows by adding categoryId in buildGroupedRows.
         return ims.initSidebar({
           activeNav: "inventory",
           activeCategoryId: activeCatId,

@@ -242,6 +242,33 @@
     return (category && category.custom_fields) || [];
   }
 
+  function formatCategoryPath(category) {
+    if (!category) return "—";
+    var path = category.full_name || category.fullName || "";
+    // Some endpoints may return a brief category object without full_name.
+    // Prefer reconstructing at least one parent level when available.
+    if (!path) {
+      var parentName = category.parent_name || category.parentName || "";
+      if (parentName) path = parentName + " > " + (category.name || "");
+      else path = category.name || "";
+    }
+    return path ? String(path).split(" > ").join("/") : "—";
+  }
+
+  function formatCategoryLeaf(category) {
+    if (!category) return "—";
+    return String(category.name || "—");
+  }
+
+  function formatItemPath(item) {
+    if (!item) return "—";
+    // User-facing displays prefer leaf category only.
+    var categoryPath = formatCategoryLeaf(item.category);
+    var itemName = ((item.display_name || "") + "").trim();
+    if (!itemName || itemName.indexOf("Item #") === 0 || itemName === "Inventory item") return categoryPath;
+    return categoryPath + "/" + itemName;
+  }
+
   function formatCustomFieldValue(field, customValues) {
     if (!field) return "—";
     customValues = customValues || {};
@@ -479,7 +506,6 @@
     var commands = [
       { label: "Go to Dashboard", hint: "Page", action: function () { window.location.href = "/"; } },
       { label: "Go to Inventory", hint: "Page", action: function () { window.location.href = "/inventory/"; } },
-      { label: "Go to Logs", hint: "Page", action: function () { window.location.href = "/history/"; } },
       { label: "Add Item", hint: "Action", action: function () { window.location.href = "/add/"; }, requiresWrite: true },
       { label: "Open Administration", hint: "Page", action: function () { window.location.href = "/admin-panel/"; }, requiresSuperuser: true },
       { label: "Toggle Sidebar", hint: "Action", action: function () {
@@ -543,6 +569,11 @@
     var backdrop = document.getElementById("sidebarBackdrop");
     var main = shell ? shell.querySelector(".app-main") : null;
     if (!shell || !aside || !backdrop) return Promise.resolve(null);
+
+    // New sidebar v2 handles UI interactions itself.
+    if (aside.classList.contains("sidebar-v2") && window.imsSidebar && typeof window.imsSidebar.init === "function") {
+      window.imsSidebar.init();
+    }
 
     return Promise.all([
       options.categoryTree ? Promise.resolve(options.categoryTree) : getCategoryTree(),
@@ -668,6 +699,14 @@
         if (userAvatarEl) userAvatarEl.textContent = initials;
         if (compactLogoutEl) compactLogoutEl.textContent = initials;
         if (adminLink) adminLink.classList.toggle("d-none", !isSuperuser(currentUser));
+
+        // Sidebar v2 active handling (leaf items).
+        if (aside.classList.contains("sidebar-v2")) {
+          aside.querySelectorAll("[data-nav-id]").forEach(function (el) {
+            el.classList.toggle("active", el.getAttribute("data-nav-id") === activeNav);
+          });
+        }
+
         if (inventoryHead) inventoryHead.classList.toggle("active", activeNav === "inventory");
         if (inventoryMain) inventoryMain.classList.toggle("active", activeNav === "inventory");
         if (!didInitActivePath && activeCategoryId && activeCategoryId !== "all" && !openTreeIds.length) {
@@ -724,6 +763,14 @@
           logout();
         });
       });
+
+      // Sidebar v2 footer logout.
+      var v2User = aside.querySelector("#sidebarUser");
+      if (v2User) {
+        v2User.addEventListener("click", function () {
+          logout();
+        });
+      }
 
       if (brandToggle) {
         function toggleFromBrand() {
@@ -850,6 +897,9 @@
     countItemsByCategory: countItemsByCategory,
     findCategoryById: findCategoryById,
     getCategoryCustomFields: getCategoryCustomFields,
+    formatCategoryPath: formatCategoryPath,
+    formatCategoryLeaf: formatCategoryLeaf,
+    formatItemPath: formatItemPath,
     formatCustomFieldValue: formatCustomFieldValue,
     renderCustomFieldInputs: renderCustomFieldInputs,
     collectCustomFieldValues: collectCustomFieldValues,

@@ -1,5 +1,6 @@
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.db import transaction
 from rest_framework import serializers
 from simple_history.utils import update_change_reason
 
@@ -453,6 +454,106 @@ class InventoryLogWriteSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         validated_data["performed_by"] = self.context["request"].user
         return super().create(validated_data)
+
+
+class InventoryAdjustSerializer(serializers.Serializer):
+    STOCK_IN = "stock_in"
+    STOCK_OUT = "stock_out"
+    DEPLOY = "deploy"
+    RETURN = "return"
+    MARK_FAULTY = "mark_faulty"
+
+    action = serializers.ChoiceField(
+        choices=(
+            (STOCK_IN, "Stock in"),
+            (STOCK_OUT, "Stock out"),
+            (DEPLOY, "Deploy"),
+            (RETURN, "Return"),
+            (MARK_FAULTY, "Mark faulty"),
+        )
+    )
+    quantity = serializers.IntegerField(min_value=1)
+    deployed_to = serializers.CharField(required=False, allow_blank=True, max_length=255)
+    notes = serializers.CharField(required=False, allow_blank=True)
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        item: InventoryItem = self.context["item"]
+        action = attrs["action"]
+        qty = attrs["quantity"]
+
+        if action in {self.STOCK_OUT, self.DEPLOY} and item.quantity < qty:
+            raise serializers.ValidationError({"quantity": f"Only {item.quantity} available in stock."})
+
+        if action in {self.DEPLOY, self.RETURN}:
+            deployed_to = (attrs.get("deployed_to") or "").strip()
+            if not deployed_to:
+                raise serializers.ValidationError({"deployed_to": "This field is required for deploy/return actions."})
+            attrs["deployed_to"] = deployed_to
+
+        attrs["notes"] = (attrs.get("notes") or "").strip()
+        return attrs
+
+    @transaction.atomic
+    def save(self, **kwargs):
+        request = self.context["request"]
+        item: InventoryItem = self.context["item"]
+        # Lock row to avoid concurrent stock edits.
+        item = InventoryItem.objects.select_for_update().select_related("category").get(pk=item.pk)
+
+        action = self.validated_data["action"]
+        qty = self.validated_data["quantity"]
+        deployed_to = self.validated_data.get("deployed_to", "")
+        notes = self.validated_data.get("notes", "")
+
+        old_qty = item.quantity
+        old_status = item.status
+
+        if action == self.STOCK_IN:
+            item.quantity = old_qty + qty
+            item.status = InventoryItem.Status.IN_STOCK
+            log_action = InventoryLog.Action.ADDED
+            reason = notes or f"Stocked in (+{qty})"
+        elif action == self.STOCK_OUT:
+            item.quantity = old_qty - qty
+            log_action = InventoryLog.Action.REMOVED
+            reason = notes or f"Stocked out (-{qty})"
+        elif action == self.DEPLOY:
+            item.quantity = old_qty - qty
+            item.status = InventoryItem.Status.DEPLOYED
+            log_action = InventoryLog.Action.DEPLOYED
+            reason = notes or f"Deployed (-{qty}) to {deployed_to}"
+        elif action == self.RETURN:
+            item.quantity = old_qty + qty
+            item.status = InventoryItem.Status.IN_STOCK
+            log_action = InventoryLog.Action.RETURNED
+            reason = notes or f"Returned (+{qty}) from {deployed_to}"
+        else:  # MARK_FAULTY
+            item.status = InventoryItem.Status.FAULTY
+            log_action = InventoryLog.Action.FAULTY
+            reason = notes or "Marked as faulty"
+
+        if item.quantity == 0:
+            item.status = InventoryItem.Status.OUT_OF_STOCK
+
+        item.save()
+        update_change_reason(item, reason)
+
+        InventoryLog.objects.create(
+            item=item,
+            action=log_action,
+            quantity_before=old_qty,
+            quantity_after=item.quantity,
+            deployed_to=deployed_to if log_action in {InventoryLog.Action.DEPLOYED, InventoryLog.Action.RETURNED} else "",
+            notes=reason,
+            performed_by=request.user,
+        )
+
+        # For "stock out" we keep status unless quantity hits 0; for deploy we force DEPLOYED.
+        if action == self.STOCK_OUT and old_status != item.status and not notes:
+            update_change_reason(item, f"Stock out (-{qty})")
+
+        return item
 
 
 class HistorySerializer(serializers.ModelSerializer):

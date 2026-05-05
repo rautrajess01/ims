@@ -78,7 +78,7 @@
           groups[groupName].forEach(function (c) {
             var o = document.createElement("option");
             o.value = c.id;
-            o.textContent = c.label;
+            o.textContent = ims.formatCategoryLeaf(c);
             og.appendChild(o);
           });
           sel.appendChild(og);

@@ -27,6 +27,7 @@ from .serializers import (
     CurrentUserSerializer,
     DashboardSerializer,
     HistorySerializer,
+    InventoryAdjustSerializer,
     InventoryItemSerializer,
     InventoryItemWriteSerializer,
     InventoryLogSerializer,
@@ -125,6 +126,22 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
         if page is not None:
             return self.get_paginated_response(ser.data)
         return Response(ser.data)
+
+    @action(detail=True, methods=["post"], url_path="adjust")
+    def adjust(self, request, pk=None):
+        """
+        Adjust stock in a controlled way and always create a log.
+        Payload:
+          - action: stock_in | stock_out | deploy | return | mark_faulty
+          - quantity: integer (required for all except mark_faulty still requires 1; keep consistent)
+          - deployed_to: required for deploy/return
+          - notes: optional
+        """
+        item = self.get_object()
+        ser = InventoryAdjustSerializer(data=request.data, context={"request": request, "item": item})
+        ser.is_valid(raise_exception=True)
+        updated_item = ser.save()
+        return Response(InventoryItemSerializer(updated_item, context={"request": request}).data, status=status.HTTP_200_OK)
 
 
 class InventoryLogViewSet(viewsets.ModelViewSet):
@@ -293,7 +310,21 @@ class ImportItemsAPIView(APIView):
             try:
                 cat_name = (row.get(col("category")) or "").strip()
                 qty = int((row.get(col("quantity")) or "0") or 0)
-                st = (row.get(col("status")) or "").strip() or InventoryItem.Status.IN_STOCK
+                st_raw = (row.get(col("status")) or "").strip()
+                st_map = {
+                    "in-stock": InventoryItem.Status.IN_STOCK,
+                    "in stock": InventoryItem.Status.IN_STOCK,
+                    "instock": InventoryItem.Status.IN_STOCK,
+                    "in_stock": InventoryItem.Status.IN_STOCK,
+                    "deployed": InventoryItem.Status.DEPLOYED,
+                    "out-of-stock": InventoryItem.Status.OUT_OF_STOCK,
+                    "out of stock": InventoryItem.Status.OUT_OF_STOCK,
+                    "out_of_stock": InventoryItem.Status.OUT_OF_STOCK,
+                    "faulty": InventoryItem.Status.FAULTY,
+                    "na": InventoryItem.Status.NA,
+                    "n/a": InventoryItem.Status.NA,
+                }
+                st = st_map.get(st_raw.lower(), st_raw) or InventoryItem.Status.IN_STOCK
                 remark = str(row.get(col("remark")) or "").strip() if "remark" in normalize else ""
                 custom_values = {}
                 if "custom_values" in normalize:

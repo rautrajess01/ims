@@ -77,8 +77,8 @@
         ims.api.get("/items/" + id + "/logs/?page_size=200"),
       ]).then(function (res) {
         var it = res[0].data;
-        document.getElementById("titleSpecs").textContent = it.display_name || "Inventory item";
-        document.getElementById("titleCat").textContent = it.category ? it.category.full_name || it.category.name : "";
+        document.getElementById("titleSpecs").textContent = ims.formatItemPath(it);
+        document.getElementById("titleCat").textContent = it.category ? ims.formatCategoryLeaf(it.category) : "";
         document.getElementById("fQty").textContent = it.quantity;
         document.getElementById("fSt").innerHTML = ims.statusBadge(it.status);
         document.getElementById("fUpd").textContent = it.last_updated ? new Date(it.last_updated).toLocaleString() : "—";

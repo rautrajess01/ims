@@ -245,7 +245,7 @@
       flatCategories.forEach(function (cat) {
         var opt = document.createElement("option");
         opt.value = cat.id;
-        opt.textContent = cat.full_name || cat.name;
+        opt.textContent = ims.formatCategoryPath(cat);
         parentSelect.appendChild(opt);
       });
     }

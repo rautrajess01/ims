@@ -106,8 +106,8 @@
           };
           rows.forEach(function (log) {
             var tr = document.createElement("tr");
-            var spec = log.item ? (log.item.display_name || "Inventory item") : "—";
-            var cat = log.item && log.item.category ? (log.item.category.full_name || log.item.category.name) : "—";
+            var spec = log.item ? ims.formatItemPath(log.item) : "—";
+            var cat = log.item && log.item.category ? ims.formatCategoryLeaf(log.item.category) : "—";
             var user = log.performed_by ? log.performed_by.username : "—";
             tr.innerHTML =
               "<td><small>" + ims.escapeHtml(new Date(log.timestamp).toLocaleString()) + "</small></td><td>" +
@@ -151,7 +151,7 @@
         ims.results(res.data).forEach(function (c) {
           var o = document.createElement("option");
           o.value = c.id;
-          o.textContent = c.full_name || c.name;
+          o.textContent = ims.formatCategoryLeaf(c);
           sel.appendChild(o);
         });
       });

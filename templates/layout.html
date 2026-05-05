@@ -28,10 +28,6 @@
       href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css"
       rel="stylesheet"
     />
-    <link
-      rel="stylesheet"
-      href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css"
-    />
     <link rel="stylesheet" href="/static/css/app.css" />
     {% block head_extra %}{% endblock %}
   </head>
@@ -39,59 +35,97 @@
     <div class="ims-session-pill d-none" id="readOnlyPill">Read-only mode</div>
     {% if show_sidebar|default:True and request.path != '/login/' %}
     <div class="app-shell" id="appShell">
-      <aside class="app-sidebar no-transition" id="appSidebar">
-        <div class="sidebar-inner">
-          <nav class="sidebar-nav">
-            <div class="sidebar-brand-row">
-              <button class="sidebar-nav-link sidebar-brand-toggle" id="sidebarBrandToggle" type="button" aria-label="Toggle sidebar" data-tooltip="Menu">
-                <i class="bi bi-list sidebar-icon"></i>
-                <span class="sidebar-label">Menu</span>
-              </button>
+      <aside class="app-sidebar sidebar-v2 no-transition" id="appSidebar">
+        <div class="sidebar-v2-inner">
+          <div class="sidebar-v2-header">
+            <div class="sidebar-v2-brand" role="button" tabindex="0" aria-label="IMS Home" onclick="window.location.href='/'">
+              <span class="sidebar-v2-logo" aria-hidden="true">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+                  <path d="M16.8 7.6c-1.2-1-2.8-1.6-4.8-1.6-2.6 0-4.6 1.1-4.6 3 0 1.8 1.7 2.4 4.2 2.9 3 .6 5.6 1.6 5.6 4.6 0 3-2.9 4.6-6.2 4.6-2.2 0-4.3-.7-5.8-2.1" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                  <path d="M6.8 18.4c1.2 1 2.8 1.6 4.8 1.6 2.6 0 4.6-1.1 4.6-3 0-1.8-1.7-2.4-4.2-2.9-3-.6-5.6-1.6-5.6-4.6 0-3 2.9-4.6 6.2-4.6 2.2 0 4.3.7 5.8 2.1" stroke="currentColor" stroke-width="2" stroke-linecap="round" opacity="0.0"/>
+                </svg>
+              </span>
+              <span class="sidebar-v2-brand-text" id="sidebarBrandText">Subisu IMS</span>
             </div>
-            <a class="sidebar-nav-link" href="/" data-nav="dashboard" data-tooltip="Dashboard">
-              <i class="bi bi-grid-1x2-fill sidebar-icon"></i>
-              <span class="sidebar-label">Dashboard</span>
-            </a>
+            <button class="sidebar-v2-toggle" id="sidebarToggleBtn" type="button" aria-label="Toggle sidebar">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M4 6h16M4 12h16M4 18h16" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+              </svg>
+            </button>
+          </div>
 
-            <div class="sidebar-inventory-row">
-              <div class="sidebar-inventory-head" data-nav="inventory">
-                <a class="inventory-head-main" href="/inventory/" data-nav-link="inventory" data-tooltip="Inventory">
-                  <i class="bi bi-archive-fill sidebar-icon"></i>
-                  <span class="sidebar-label">Inventory</span>
-                </a>
-                <button class="inventory-toggle-btn" id="inventoryTreeToggle" type="button" aria-label="Toggle inventory categories">
-                  <i class="bi bi-chevron-down inventory-toggle-icon"></i>
+          <nav class="sidebar-v2-nav" aria-label="Sidebar navigation">
+            <div class="sidebar-v2-scroll">
+              <a class="sidebar-v2-item" href="/" data-nav-id="dashboard" data-nav-leaf="1">
+                <span class="sidebar-v2-icon" aria-hidden="true">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+                    <path d="M4 4h7v7H4V4Zm9 0h7v10h-7V4ZM4 13h7v7H4v-7Zm9 3h7v4h-7v-4Z" stroke="currentColor" stroke-width="1.6"/>
+                  </svg>
+                </span>
+                <span class="sidebar-v2-label">Dashboard</span>
+                <span class="sidebar-v2-tooltip">Dashboard</span>
+              </a>
+
+              <div class="sidebar-v2-section">
+                <div class="sidebar-v2-section-label">INVENTORY</div>
+                <button class="sidebar-v2-item sidebar-v2-parent" type="button" data-nav-id="inventory" data-submenu-toggle="inv" data-href="/inventory/" aria-expanded="false">
+                  <span class="sidebar-v2-icon" aria-hidden="true">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+                      <path d="M4.5 7.5 12 3l7.5 4.5V20a1 1 0 0 1-1 1h-13a1 1 0 0 1-1-1V7.5Z" stroke="currentColor" stroke-width="1.6"/>
+                      <path d="M8 10h8M8 14h8M8 18h5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+                    </svg>
+                  </span>
+                  <span class="sidebar-v2-label">Inventory</span>
+                  <span class="sidebar-v2-chevron" aria-hidden="true">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                      <path d="M9 18l6-6-6-6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                  </span>
+                  <span class="sidebar-v2-tooltip">Inventory</span>
                 </button>
+                <div class="sidebar-v2-submenu closed" data-submenu="inv">
+                  <a class="sidebar-v2-subitem" href="/inventory/" data-nav-id="inventory" data-nav-leaf="1">
+                    <span class="sidebar-v2-dot" aria-hidden="true"></span>
+                    <span class="sidebar-v2-sublabel">Browse</span>
+                  </a>
+                  <a class="sidebar-v2-subitem" href="/add/" data-nav-id="add" data-nav-leaf="1" data-requires-write>
+                    <span class="sidebar-v2-dot" aria-hidden="true"></span>
+                    <span class="sidebar-v2-sublabel">Add item</span>
+                  </a>
+                </div>
               </div>
-              <div class="sidebar-tree-expanded" id="sidebarTreeExpanded"></div>
-              <div class="sidebar-tree-floating" id="sidebarTreeFloating"></div>
+
+              <div class="sidebar-v2-section">
+                <div class="sidebar-v2-section-label">SETTINGS</div>
+                <a class="sidebar-v2-item d-none" href="/admin-panel/" id="sidebarAdminLink" data-nav-id="admin" data-nav-leaf="1">
+                  <span class="sidebar-v2-icon" aria-hidden="true">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+                      <path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z" stroke="currentColor" stroke-width="1.6"/>
+                      <path d="M19.4 15a8.6 8.6 0 0 0 .1-2l2-1.5-2-3.5-2.4.7a8.7 8.7 0 0 0-1.7-1L15 5H9l-.4 2.7a8.7 8.7 0 0 0-1.7 1L4.5 8l-2 3.5 2 1.5a8.6 8.6 0 0 0 .1 2l-2 1.5 2 3.5 2.4-.7a8.7 8.7 0 0 0 1.7 1L9 19h6l.4-2.7a8.7 8.7 0 0 0 1.7-1l2.4.7 2-3.5-2-1.5Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/>
+                    </svg>
+                  </span>
+                  <span class="sidebar-v2-label">Administration</span>
+                  <span class="sidebar-v2-tooltip">Administration</span>
+                </a>
+              </div>
             </div>
-
-            <a class="sidebar-nav-link" href="/history/" data-nav="history" data-tooltip="Logs">
-              <i class="bi bi-journal-richtext sidebar-icon"></i>
-              <span class="sidebar-label">Logs</span>
-            </a>
-
-            <a class="sidebar-nav-link d-none" href="/admin-panel/" id="sidebarAdminLink" data-nav="admin" data-tooltip="Administration">
-              <i class="bi bi-sliders2-vertical sidebar-icon"></i>
-              <span class="sidebar-label">Administration</span>
-            </a>
           </nav>
 
-          <div class="sidebar-footer">
-            <div class="sidebar-user" id="sidebarUser">
-              <span class="sidebar-user-avatar" id="sidebarUserAvatar">U</span>
-              <div class="sidebar-user-meta">
-                <div class="sidebar-user-name" id="sidebarUserName">User</div>
-                <div class="sidebar-user-label" id="sidebarUserRole">regular</div>
-              </div>
-              <button class="sidebar-logout" type="button" id="btnLogout" title="Logout" aria-label="Logout">
-                <i class="bi bi-box-arrow-right"></i>
-              </button>
-            </div>
-            <div class="sidebar-avatar-only">
-              <button class="sidebar-avatar-button" type="button" id="btnLogoutCompact" data-tooltip="Logout">U</button>
-            </div>
+          <div class="sidebar-v2-footer">
+            <button class="sidebar-v2-user" type="button" id="sidebarUser">
+              <span class="sidebar-v2-avatar" id="sidebarUserAvatar">U</span>
+              <span class="sidebar-v2-usertext">
+                <span class="sidebar-v2-username" id="sidebarUserName">User</span>
+                <span class="sidebar-v2-role" id="sidebarUserRole">regular</span>
+              </span>
+              <span class="sidebar-v2-logout" aria-hidden="true">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+                  <path d="M10 7V5a2 2 0 0 1 2-2h6v18h-6a2 2 0 0 1-2-2v-2" stroke="currentColor" stroke-width="1.6"/>
+                  <path d="M3 12h9M7 8l-4 4 4 4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+              </span>
+              <span class="sidebar-v2-tooltip">Logout</span>
+            </button>
           </div>
         </div>
       </aside>
@@ -131,6 +165,7 @@
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/axios@1.7.7/dist/axios.min.js"></script>
     <script src="/static/js/modules/ui-utils.js"></script>
+    <script src="/static/js/modules/sidebar-v2.js"></script>
     <script src="/static/js/api.js"></script>
     {% block scripts %}{% endblock %}
   </body>
