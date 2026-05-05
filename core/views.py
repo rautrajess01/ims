@@ -213,7 +213,8 @@ class ExportItemsAPIView(APIView):
             [
                 "id",
                 "category",
-                "display_name",
+                "specs",
+                "capacity",
                 "custom_values",
                 "quantity",
                 "status",
@@ -227,7 +228,8 @@ class ExportItemsAPIView(APIView):
                 [
                     row.id,
                     row.category.full_name,
-                    row.display_name,
+                    row.specs,
+                    row.capacity,
                     json.dumps(row.custom_values),
                     row.quantity,
                     row.status,
@@ -291,13 +293,13 @@ class ImportItemsAPIView(APIView):
             return Response({"detail": "Missing file field 'file'."}, status=status.HTTP_400_BAD_REQUEST)
         raw = upload.read().decode("utf-8-sig")
         reader = csv.DictReader(io.StringIO(raw))
-        required = {"category", "quantity", "status"}
+        required = {"category", "specs", "quantity", "status"}
         if not reader.fieldnames:
             return Response({"detail": "CSV has no headers."}, status=status.HTTP_400_BAD_REQUEST)
         normalize = {h.strip().lower(): h.strip() for h in reader.fieldnames if h and h.strip()}
         if not required.issubset(normalize.keys()):
             return Response(
-                {"detail": "CSV must include headers: category, quantity, status."},
+                {"detail": "CSV must include headers: category, specs, quantity, status."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
         created = 0
@@ -325,16 +327,30 @@ class ImportItemsAPIView(APIView):
                     "n/a": InventoryItem.Status.NA,
                 }
                 st = st_map.get(st_raw.lower(), st_raw) or InventoryItem.Status.IN_STOCK
+                specs = (row.get(col("specs")) or "").strip()
+                capacity = str(row.get(col("capacity")) or "").strip() if "capacity" in normalize else ""
                 remark = str(row.get(col("remark")) or "").strip() if "remark" in normalize else ""
                 custom_values = {}
                 if "custom_values" in normalize:
                     custom_values = json.loads((row.get(col("custom_values")) or "{}").strip() or "{}")
+                # Backward compatibility: if a CSV embeds specs/capacity inside custom_values, hoist them.
+                if not specs:
+                    specs = str(custom_values.get("specs") or "").strip()
+                if not capacity:
+                    capacity = str(custom_values.get("capacity") or "").strip()
+                custom_values.pop("specs", None)
+                custom_values.pop("capacity", None)
                 category = self.resolve_category(cat_name)
                 if not category:
                     errors.append({"row": i, "error": f"Unknown category: {cat_name}"})
                     continue
+                if not specs:
+                    errors.append({"row": i, "error": "Missing specs"})
+                    continue
                 data = {
                     "category": category,
+                    "specs": specs,
+                    "capacity": capacity,
                     "custom_values": custom_values,
                     "quantity": qty,
                     "status": st,

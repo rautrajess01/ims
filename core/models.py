@@ -7,6 +7,7 @@ import re
 
 CUSTOM_FIELD_NAME_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 CUSTOM_FIELD_TYPES = {"string", "integer", "float", "boolean", "choice"}
+RESERVED_ITEM_FIELDS = {"specs", "capacity"}
 
 
 def validate_custom_field_schema(schema):
@@ -33,6 +34,8 @@ def validate_custom_field_schema(schema):
             raise ValidationError({"custom_fields": f"Field #{index + 1} is missing a name."})
         if not CUSTOM_FIELD_NAME_RE.match(name):
             raise ValidationError({"custom_fields": f"Field '{name}' must use snake_case."})
+        if name in RESERVED_ITEM_FIELDS:
+            raise ValidationError({"custom_fields": f"Field name '{name}' is reserved. Use a different name."})
         if name in seen_names:
             raise ValidationError({"custom_fields": f"Duplicate field name '{name}' is not allowed."})
         if field_type not in CUSTOM_FIELD_TYPES:
@@ -226,6 +229,8 @@ class InventoryItem(models.Model):
         on_delete=models.PROTECT,
         related_name="items",
     )
+    specs = models.CharField(max_length=512)
+    capacity = models.CharField(max_length=128, blank=True, default="")
     quantity = models.PositiveIntegerField(default=0)
     custom_values = models.JSONField(default=dict, blank=True)
     status = models.CharField(
@@ -246,6 +251,8 @@ class InventoryItem(models.Model):
 
     @property
     def display_name(self):
+        if (self.specs or "").strip():
+            return str(self.specs).strip()
         schema = validate_custom_field_schema(self.category.custom_fields if self.category_id else [])
         for field in schema:
             value = (self.custom_values or {}).get(field["name"])

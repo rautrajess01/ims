@@ -10,6 +10,7 @@
       <h1 class="h4" id="titleSpecs">—</h1>
       <p class="text-secondary mb-1" id="titleCat">—</p>
       <div class="row g-2 small">
+        <div class="col-md-3"><strong>Capacity</strong><br /><span id="fCap">—</span></div>
         <div class="col-md-3"><strong>Quantity</strong><br /><span id="fQty">—</span></div>
         <div class="col-md-3"><strong>Status</strong><br /><span id="fSt">—</span></div>
         <div class="col-md-3"><strong>Updated</strong><br /><span id="fUpd">—</span></div>
@@ -77,8 +78,22 @@
         ims.api.get("/items/" + id + "/logs/?page_size=200"),
       ]).then(function (res) {
         var it = res[0].data;
-        document.getElementById("titleSpecs").textContent = ims.formatItemPath(it);
-        document.getElementById("titleCat").textContent = it.category ? ims.formatCategoryLeaf(it.category) : "";
+        function resolveSpecs(item) {
+          if (!item) return "";
+          if (item.specs !== undefined && item.specs !== null && String(item.specs).trim() !== "") return String(item.specs).trim();
+          var schema = item.category && item.category.custom_fields ? item.category.custom_fields : [];
+          var values = item.custom_values || {};
+          for (var i = 0; i < schema.length; i += 1) {
+            var field = schema[i];
+            var v = values[field.name];
+            if (v !== undefined && v !== null && String(v).trim() !== "") return String(v).trim();
+          }
+          return String(item.display_name || "").trim();
+        }
+        var specs = resolveSpecs(it);
+        document.getElementById("titleSpecs").textContent = specs || ("Item #" + it.id);
+        document.getElementById("titleCat").textContent = (it.category ? ims.formatCategoryLeaf(it.category) : "") + " · Item #" + it.id;
+        document.getElementById("fCap").textContent = (it.capacity || "").trim() || "—";
         document.getElementById("fQty").textContent = it.quantity;
         document.getElementById("fSt").innerHTML = ims.statusBadge(it.status);
         document.getElementById("fUpd").textContent = it.last_updated ? new Date(it.last_updated).toLocaleString() : "—";

@@ -46,6 +46,7 @@ class CategoryHierarchyTests(APITestCase):
         root = Category.objects.create(name="Standalone")
         InventoryItem.objects.create(
             category=root,
+            specs="Standalone unit",
             quantity=1,
             status=InventoryItem.Status.IN_STOCK,
         )
@@ -59,6 +60,7 @@ class CategoryHierarchyTests(APITestCase):
         item_category = Category.objects.create(name="Delete Item Category")
         InventoryItem.objects.create(
             category=item_category,
+            specs="Delete unit",
             quantity=2,
             status=InventoryItem.Status.IN_STOCK,
         )
@@ -163,6 +165,7 @@ class RoleAndAdminApiTests(APITestCase):
             "/api/v1/items/",
             {
                 "category": self.category.id,
+                "specs": "Unit",
                 "quantity": 1,
                 "status": InventoryItem.Status.IN_STOCK,
             },
@@ -178,6 +181,7 @@ class RoleAndAdminApiTests(APITestCase):
             "/api/v1/items/",
             {
                 "category": self.category.id,
+                "specs": "Unit",
                 "quantity": 1,
                 "status": InventoryItem.Status.IN_STOCK,
             },
@@ -199,6 +203,7 @@ class RoleAndAdminApiTests(APITestCase):
             "/api/v1/items/",
             {
                 "category": self.category.id,
+                "specs": "Bad unit",
                 "quantity": 1,
                 "status": InventoryItem.Status.IN_STOCK,
                 "custom_values": {"ports": "48"},
@@ -213,6 +218,7 @@ class RoleAndAdminApiTests(APITestCase):
             "/api/v1/items/",
             {
                 "category": self.category.id,
+                "specs": "Good unit",
                 "quantity": 1,
                 "status": InventoryItem.Status.IN_STOCK,
                 "custom_values": {"serial_number": "SN-100", "ports": 48, "managed": True},
@@ -228,6 +234,7 @@ class RoleAndAdminApiTests(APITestCase):
         item = InventoryItem.objects.create(
             category=self.category,
             custom_values={"serial_number": "SW-01"},
+            specs="Switch SW-01",
             quantity=5,
             status=InventoryItem.Status.IN_STOCK,
         )
@@ -286,6 +293,7 @@ class RoleAndAdminApiTests(APITestCase):
         self.client.force_authenticate(self.superuser)
         InventoryItem.objects.create(
             category=self.category,
+            specs="Delete category unit",
             quantity=1,
             status=InventoryItem.Status.IN_STOCK,
         )
@@ -315,12 +323,14 @@ class RoleAndAdminApiTests(APITestCase):
         InventoryItem.objects.create(
             category=self.category,
             custom_values={"serial_number": "Low Switch"},
+            specs="Low Switch",
             quantity=1,
             status=InventoryItem.Status.IN_STOCK,
         )
         InventoryItem.objects.create(
             category=self.category,
             custom_values={"serial_number": "Healthy Switch"},
+            specs="Healthy Switch",
             quantity=8,
             status=InventoryItem.Status.IN_STOCK,
         )
@@ -337,6 +347,7 @@ class RoleAndAdminApiTests(APITestCase):
         item = InventoryItem.objects.create(
             category=self.category,
             custom_values={"serial_number": "Export Unit"},
+            specs="Export Unit",
             quantity=2,
             status=InventoryItem.Status.IN_STOCK,
         )

@@ -18,6 +18,14 @@
           <div id="customFieldsContainer"></div>
         </div>
         <div class="mb-3">
+          <label class="form-label">Specs</label>
+          <input class="form-control" type="text" name="specs" required placeholder="e.g. Sky Hynex" />
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Capacity</label>
+          <input class="form-control" type="text" name="capacity" placeholder="e.g. 16 GB / 8 Core / 2.10 GHz" />
+        </div>
+        <div class="mb-3">
           <label class="form-label">Quantity</label>
           <input class="form-control" type="number" min="0" name="quantity" value="0" />
         </div>
@@ -98,6 +106,8 @@
       var chosenCategoryId = fd.get("category");
       var payload = {
         category: parseInt(fd.get("category"), 10),
+        specs: (fd.get("specs") || "").trim(),
+        capacity: (fd.get("capacity") || "").trim(),
         custom_values: ims.collectCustomFieldValues(e.target, currentSchema),
         quantity: parseInt(fd.get("quantity") || "0", 10),
         status: fd.get("status"),

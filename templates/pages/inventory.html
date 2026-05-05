@@ -43,38 +43,6 @@
   </div>
 </div>
 
-<div class="modal fade" id="manageGroupModal" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog modal-lg modal-dialog-scrollable">
-    <div class="modal-content">
-      <div class="modal-header">
-        <div>
-          <h5 class="modal-title mb-0">Manage items</h5>
-          <div class="text-secondary small" id="manageGroupSubtitle"></div>
-        </div>
-        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-      </div>
-      <div class="modal-body">
-        <div class="table-responsive">
-          <table class="table table-sm align-middle mb-0">
-            <thead class="table-light">
-              <tr>
-                <th>Item</th>
-                <th>Qty</th>
-                <th>Status</th>
-                <th>Remark</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody id="manageGroupBody"></tbody>
-          </table>
-        </div>
-      </div>
-      <div class="modal-footer">
-        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Close</button>
-      </div>
-    </div>
-  </div>
-</div>
 {% endblock %}
 {% block scripts %}
 <script>
@@ -87,7 +55,6 @@
     var sidebarApi = null;
     var searchTimer = null;
     var currentUser = null;
-    var manageModal = null;
 
     function syncUrl() {
       var next = new URL(window.location.href);
@@ -122,23 +89,12 @@
       }).join(" ");
       return (
         ((item.category && (item.category.full_name || item.category.name)) || "") +
+        " " + (item.specs || "") +
+        " " + (item.capacity || "") +
         " " + (item.display_name || "") +
         " " + (item.remark || "") +
         " " + customText
       ).toLowerCase();
-    }
-
-    function resolveGroupLabel(item) {
-      if (!item) return "";
-      var schema = (item.category && item.category.custom_fields) ? item.category.custom_fields : [];
-      var values = item.custom_values || {};
-      for (var i = 0; i < schema.length; i += 1) {
-        var field = schema[i];
-        var v = values[field.name];
-        if (v !== undefined && v !== null && String(v).trim() !== "") return String(v).trim();
-      }
-      // Fallback to API-provided display_name
-      return String(item.display_name || "").trim();
     }
 
     function renderCategoryFilterOptions() {
@@ -164,8 +120,7 @@
     function renderTableHead() {
       var head = document.getElementById("tableHeadRow");
       head.innerHTML = "";
-      var labels = ["Category", "Group", "Stock", "Items", "Updated"];
-      if (currentUser && ims.canManageInventory(currentUser)) labels.push("Actions");
+      var labels = ["Category", "Specs", "Capacity", "Quantity", "Remark", "Status", "Actions"];
       labels.forEach(function (label) {
         var th = document.createElement("th");
         th.textContent = label;
@@ -173,152 +128,55 @@
       });
     }
 
-    function buildGroupedRows() {
+    function buildFlatRows() {
       var q = (document.getElementById("searchQ").value || "").toLowerCase();
-      var grouped = {};
-
-      allItems.forEach(function (it) {
+      return (allItems || []).filter(function (it) {
         if (
           activeCatId !== "all" &&
           (descendantsById[String(activeCatId)] || []).indexOf(String(it.category.id)) < 0
-        ) return;
-
-        if (q && buildSearchBlob(it).indexOf(q) < 0) return;
-
-        var groupLabel = resolveGroupLabel(it);
-        var key = String(it.category.id) + "::" + String(groupLabel).trim().toLowerCase();
-        if (!grouped[key]) {
-          grouped[key] = {
-            categoryId: String(it.category.id),
-            categoryPath: ims.formatCategoryLeaf(it.category),
-            groupLabel: String(groupLabel || "").trim(),
-            quantity: 0,
-            itemRows: 0,
-            lastUpdated: it.last_updated || null,
-          };
-        }
-
-        grouped[key].quantity += Number(it.quantity) || 0;
-        grouped[key].itemRows += 1;
-
-        if (it.last_updated && (!grouped[key].lastUpdated || new Date(it.last_updated) > new Date(grouped[key].lastUpdated))) {
-          grouped[key].lastUpdated = it.last_updated;
-        }
-      });
-
-      return Object.keys(grouped).map(function (key) {
-        return grouped[key];
+        ) return false;
+        if (q && buildSearchBlob(it).indexOf(q) < 0) return false;
+        return true;
       }).sort(function (a, b) {
-        var aKey = (a.categoryPath || "") + " / " + (a.groupLabel || "");
-        var bKey = (b.categoryPath || "") + " / " + (b.groupLabel || "");
+        var aKey = ims.formatCategoryLeaf(a.category) + " / " + String(a.specs || a.display_name || "");
+        var bKey = ims.formatCategoryLeaf(b.category) + " / " + String(b.specs || b.display_name || "");
         return aKey.localeCompare(bKey);
       });
-    }
-
-    function findMatchingItems(row) {
-      var targetCat = String(row.categoryId);
-      var targetGroup = String(row.groupLabel || "").trim().toLowerCase();
-      return (allItems || []).filter(function (it) {
-        if (!it.category || String(it.category.id) !== targetCat) return false;
-        return resolveGroupLabel(it).toLowerCase() === targetGroup;
-      });
-    }
-
-    function openManageModal(row) {
-      if (!manageModal) manageModal = bootstrap.Modal.getOrCreateInstance(document.getElementById("manageGroupModal"));
-      var subtitle = document.getElementById("manageGroupSubtitle");
-      subtitle.textContent = (row.categoryPath || "—") + " / " + (row.groupLabel || "—");
-
-      var items = findMatchingItems(row);
-
-      var body = document.getElementById("manageGroupBody");
-      body.innerHTML = "";
-      items.forEach(function (it) {
-        var tr = document.createElement("tr");
-        var itemLabel = ims.formatItemPath(it);
-        tr.innerHTML = [
-          "<td><a href=\"/item/?id=" + encodeURIComponent(it.id) + "\">" + ims.escapeHtml(itemLabel) + "</a></td>",
-          "<td>" + ims.escapeHtml(it.quantity) + "</td>",
-          "<td>" + ims.statusBadge(it.status) + "</td>",
-          "<td><small class=\"text-secondary\">" + ims.escapeHtml(it.remark || "—") + "</small></td>",
-          "<td class=\"text-end\"><div class=\"d-flex flex-wrap gap-2 justify-content-end\">"
-          + "<a class=\"btn btn-sm btn-primary\" href=\"/edit/?id=" + encodeURIComponent(it.id) + "\" data-requires-write>Edit</a>"
-          + "<button type=\"button\" class=\"btn btn-sm btn-outline-danger\" data-requires-write data-remove-item=\"1\" data-item-id=\"" + String(it.id) + "\">Remove</button>"
-          + "</div></td>",
-        ].join("");
-        body.appendChild(tr);
-      });
-      if (!items.length) {
-        if (window.imsUi) window.imsUi.setEmptyRow(body, 5, "No items found for this group.");
-        else body.innerHTML = '<tr><td colspan="5" class="text-center text-secondary p-3">No items found for this group.</td></tr>';
-      }
-      if (items.length) ims.applyPermissionVisibility(document.getElementById("manageGroupModal"), currentUser);
-
-      body.querySelectorAll("[data-remove-item]").forEach(function (btn) {
-        btn.addEventListener("click", function (e) {
-          e.preventDefault();
-          e.stopPropagation();
-          var itemId = btn.getAttribute("data-item-id");
-          if (!itemId) return;
-          if (!window.confirm("Remove this item?")) return;
-
-          ims.api
-            .delete("/items/" + itemId + "/")
-            .then(function () {
-              ims.showToast("Item removed", "success");
-              allItems = (allItems || []).filter(function (x) {
-                return String(x.id) !== String(itemId);
-              });
-              if (sidebarApi && typeof sidebarApi.setCategoryCounts === "function") {
-                sidebarApi.setCategoryCounts(ims.countItemsByCategory(allItems));
-              }
-              renderRows();
-              if (manageModal) manageModal.hide();
-            })
-            .catch(function (ex) {
-              var msg = (ex.response && ex.response.data && JSON.stringify(ex.response.data)) || "Delete failed";
-              ims.showToast(msg, "danger");
-            });
-        });
-      });
-      manageModal.show();
     }
 
     function renderRows() {
       var tb = document.getElementById("tblBody");
       tb.innerHTML = "";
-      var groupedRows = buildGroupedRows();
-      var colCount = (currentUser && ims.canManageInventory(currentUser)) ? 6 : 5;
+      var rows = buildFlatRows();
+      var colCount = 7;
       renderTableHead();
 
-      groupedRows.forEach(function (row) {
+      rows.forEach(function (it) {
         var tr = document.createElement("tr");
-        var cells = [
-          "<td><small>" + ims.escapeHtml(row.categoryPath || "—") + "</small></td>",
-          "<td>" + ims.escapeHtml(row.groupLabel || "—") + "</td>",
-          "<td>" + ims.escapeHtml(row.quantity) + "</td>",
-          "<td><small class=\"text-secondary\">" + ims.escapeHtml(row.itemRows) + "</small></td>",
-          "<td><small>" + ims.escapeHtml(row.lastUpdated ? new Date(row.lastUpdated).toLocaleString() : "—") + "</small></td>",
-        ];
-        if (currentUser && ims.canManageInventory(currentUser)) {
-          cells.push('<td class="text-end"><button class="btn btn-sm btn-outline-primary" type="button" data-manage-row="1">Manage</button></td>');
+        var canWrite = currentUser && ims.canManageInventory(currentUser);
+        var actions = '<a class="btn btn-sm btn-outline-secondary" href="/item/?id=' + encodeURIComponent(it.id) + '">View</a>';
+        if (canWrite) {
+          actions =
+            '<a class="btn btn-sm btn-outline-secondary" href="/item/?id=' + encodeURIComponent(it.id) + '">View</a>' +
+            '<a class="btn btn-sm btn-primary" href="/edit/?id=' + encodeURIComponent(it.id) + '" data-requires-write>Edit</a>' +
+            '<button type="button" class="btn btn-sm btn-outline-danger" data-requires-write data-remove-item="1" data-item-id="' + ims.escapeHtml(it.id) + '">Remove</button>';
         }
-        tr.innerHTML = cells.join("");
-        if (currentUser && ims.canManageInventory(currentUser)) {
-          tr.querySelectorAll("[data-manage-row]").forEach(function (btn) {
-            btn.addEventListener("click", function (e) {
-              e.preventDefault();
-              e.stopPropagation();
-              openManageModal(row);
-            });
-          });
-        }
+        var specsText = String(it.specs || it.display_name || ("Item #" + it.id)).trim();
+        tr.innerHTML = [
+          "<td><small>" + ims.escapeHtml(ims.formatCategoryLeaf(it.category) || "—") + "</small></td>",
+          "<td><a class=\"fw-semibold\" href=\"/item/?id=" + encodeURIComponent(it.id) + "\">" + ims.escapeHtml(specsText) + "</a></td>",
+          "<td><small class=\"text-secondary\">" + ims.escapeHtml((it.capacity || "").trim() || "—") + "</small></td>",
+          "<td>" + ims.escapeHtml(it.quantity) + "</td>",
+          "<td><small class=\"text-secondary\">" + ims.escapeHtml(it.remark || "—") + "</small></td>",
+          "<td>" + ims.statusBadge(it.status) + "</td>",
+          "<td class=\"text-end\"><div class=\"d-flex flex-wrap gap-2 justify-content-end\">" + actions + "</div></td>",
+        ].join("");
         tb.appendChild(tr);
       });
 
       if (!tb.children.length) {
-        if (window.imsUi) window.imsUi.setEmptyRow(tb, colCount, "No matching grouped inventory.");
-        else tb.innerHTML = '<tr><td colspan="' + colCount + '" class="text-center text-secondary p-4">No matching grouped inventory.</td></tr>';
+        if (window.imsUi) window.imsUi.setEmptyRow(tb, colCount, "No matching items.");
+        else tb.innerHTML = '<tr><td colspan="' + colCount + '" class="text-center text-secondary p-4">No matching items.</td></tr>';
       }
       syncUrl();
     }
@@ -331,7 +189,6 @@
         allItems = res[1];
         descendantsById = ims.buildCategoryIndexes(categoryTree).descendantsById;
         renderCategoryFilterOptions();
-        // Materialize category id inside grouped rows by adding categoryId in buildGroupedRows.
         return ims.initSidebar({
           activeNav: "inventory",
           activeCategoryId: activeCatId,
@@ -350,6 +207,33 @@
       });
     }).catch(function () {
       ims.showToast("Failed to load inventory", "danger");
+    });
+
+    document.addEventListener("click", function (e) {
+      var btn = e.target && e.target.closest ? e.target.closest("[data-remove-item]") : null;
+      if (!btn) return;
+      if (!currentUser || !ims.canManageInventory(currentUser)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      var itemId = btn.getAttribute("data-item-id");
+      if (!itemId) return;
+      if (!window.confirm("Remove this item?")) return;
+      ims.api
+        .delete("/items/" + itemId + "/")
+        .then(function () {
+          ims.showToast("Item removed", "success");
+          allItems = (allItems || []).filter(function (x) {
+            return String(x.id) !== String(itemId);
+          });
+          if (sidebarApi && typeof sidebarApi.setCategoryCounts === "function") {
+            sidebarApi.setCategoryCounts(ims.countItemsByCategory(allItems));
+          }
+          renderRows();
+        })
+        .catch(function (ex) {
+          var msg = (ex.response && ex.response.data && JSON.stringify(ex.response.data)) || "Delete failed";
+          ims.showToast(msg, "danger");
+        });
     });
 
     document.getElementById("filterAll").addEventListener("click", function () {

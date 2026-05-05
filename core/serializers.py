@@ -249,6 +249,8 @@ class InventoryItemSerializer(serializers.ModelSerializer):
             "id",
             "category",
             "display_name",
+            "specs",
+            "capacity",
             "custom_values",
             "quantity",
             "status",
@@ -260,11 +262,15 @@ class InventoryItemSerializer(serializers.ModelSerializer):
 
 class InventoryItemWriteSerializer(serializers.ModelSerializer):
     log_note = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    specs = serializers.CharField(required=True, allow_blank=False)
+    capacity = serializers.CharField(required=False, allow_blank=True, allow_null=True)
 
     class Meta:
         model = InventoryItem
         fields = (
             "category",
+            "specs",
+            "capacity",
             "custom_values",
             "quantity",
             "status",
@@ -281,6 +287,10 @@ class InventoryItemWriteSerializer(serializers.ModelSerializer):
             status_val = attrs.get("status", instance.status)
             category = attrs.get("category", instance.category)
         custom_values = attrs.get("custom_values", instance.custom_values if instance is not None else {})
+        attrs["capacity"] = (attrs.get("capacity") or "").strip()
+        attrs["specs"] = (attrs.get("specs") if "specs" in attrs else (instance.specs if instance is not None else "")).strip()
+        if not attrs["specs"]:
+            raise serializers.ValidationError({"specs": "This field is required."})
         if category is not None and category.children.exists():
             raise serializers.ValidationError(
                 {"category": "Inventory items can only be assigned to leaf categories."}

@@ -18,6 +18,14 @@
           <div id="customFieldsContainer"></div>
         </div>
         <div class="mb-3">
+          <label class="form-label">Specs</label>
+          <input class="form-control" type="text" name="specs" id="fSpecs" required />
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Capacity</label>
+          <input class="form-control" type="text" name="capacity" id="fCap" />
+        </div>
+        <div class="mb-3">
           <label class="form-label">Quantity</label>
           <input class="form-control" type="number" min="0" name="quantity" id="fQty" />
         </div>
@@ -87,6 +95,8 @@
         });
         itemData = res[1].data;
         sel.value = itemData.category.id;
+        document.getElementById("fSpecs").value = itemData.specs || "";
+        document.getElementById("fCap").value = itemData.capacity || "";
         document.getElementById("fQty").value = itemData.quantity;
         document.getElementById("selStatus").value = itemData.status;
         document.getElementById("fRem").value = itemData.remark || "";
@@ -100,6 +110,8 @@
       var fd = new FormData(e.target);
       var payload = {
         category: parseInt(fd.get("category"), 10),
+        specs: (fd.get("specs") || "").trim(),
+        capacity: (fd.get("capacity") || "").trim(),
         custom_values: ims.collectCustomFieldValues(e.target, currentSchema),
         quantity: parseInt(fd.get("quantity") || "0", 10),
         status: fd.get("status"),
