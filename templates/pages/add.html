@@ -39,8 +39,12 @@
           <label class="form-label">Activity note</label>
           <textarea class="form-control" name="log_note" rows="2" placeholder="Added for rack A1, moved to lab shelf, initial stock, etc."></textarea>
         </div>
+        <div class="form-check mb-3">
+          <input class="form-check-input" type="checkbox" value="1" id="chkAddAnother" />
+          <label class="form-check-label" for="chkAddAnother">Add another after saving</label>
+        </div>
         <button type="submit" class="btn btn-primary">Save</button>
-        <a href="/inventory/" class="btn btn-link">Cancel</a>
+        <a href="/inventory/" class="btn btn-link text-decoration-none">Cancel</a>
       </form>
   </div>
 </div>
@@ -48,8 +52,10 @@
 {% block scripts %}
 <script>
   (function () {
+    var params = new URLSearchParams(window.location.search);
     var categoryTree = [];
     var currentSchema = [];
+    var initialCategoryId = params.get("category");
 
     function renderDynamicFields() {
       var categoryId = document.getElementById("selCat").value;
@@ -70,11 +76,16 @@
           groups[groupName].forEach(function (c) {
             var o = document.createElement("option");
             o.value = c.id;
-            o.textContent = ims.formatCategoryLeaf(c);
+            // `collectLeafCategories()` returns leaf objects shaped like {id, label, full_name}
+            // (not full Category model objects). Render using label/path instead.
+            o.textContent = (c.label || "").split(" > ").join(" / ") || c.full_name || String(c.id);
             og.appendChild(o);
           });
           sel.appendChild(og);
         });
+        if (initialCategoryId && sel.querySelector('option[value="' + initialCategoryId + '"]')) {
+          sel.value = initialCategoryId;
+        }
         sel.addEventListener("change", renderDynamicFields);
         renderDynamicFields();
       });
@@ -83,6 +94,8 @@
     document.getElementById("formItem").addEventListener("submit", function (e) {
       e.preventDefault();
       var fd = new FormData(e.target);
+      var addAnother = document.getElementById("chkAddAnother") && document.getElementById("chkAddAnother").checked;
+      var chosenCategoryId = fd.get("category");
       var payload = {
         category: parseInt(fd.get("category"), 10),
         custom_values: ims.collectCustomFieldValues(e.target, currentSchema),
@@ -93,7 +106,16 @@
       };
       ims.api.post("/items/", payload).then(function (res) {
         ims.showToast("Item created", "success");
-        window.location.href = "/item/?id=" + res.data.id;
+        if (addAnother && chosenCategoryId) {
+          window.location.href = "/add/?category=" + encodeURIComponent(chosenCategoryId);
+        } else {
+          // After creating an item, go back to inventory (optionally filtered by category).
+          var redirectUrl = "/inventory/";
+          if (chosenCategoryId) {
+            redirectUrl += "?category=" + encodeURIComponent(chosenCategoryId);
+          }
+          window.location.href = redirectUrl;
+        }
       }).catch(function (ex) {
         var msg = (ex.response && ex.response.data && JSON.stringify(ex.response.data)) || "Save failed";
         ims.showToast(msg, "danger");

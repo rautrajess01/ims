@@ -40,7 +40,7 @@
           <textarea class="form-control" name="log_note" rows="2" placeholder="Moved to this location, corrected stock count, returned from deployment, etc."></textarea>
         </div>
         <button type="submit" class="btn btn-primary">Update</button>
-        <a href="/inventory/" class="btn btn-link">Cancel</a>
+        <a href="/inventory/" class="btn btn-link text-decoration-none">Cancel</a>
       </form>
   </div>
 </div>
@@ -78,7 +78,9 @@
           groups[groupName].forEach(function (c) {
             var o = document.createElement("option");
             o.value = c.id;
-            o.textContent = ims.formatCategoryLeaf(c);
+            // `collectLeafCategories()` returns leaf objects shaped like {id, label, full_name}
+            // (not full Category model objects). Render using label/path instead.
+            o.textContent = (c.label || "").split(" > ").join(" / ") || c.full_name || String(c.id);
             og.appendChild(o);
           });
           sel.appendChild(og);

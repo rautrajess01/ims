@@ -8,7 +8,7 @@
       <p class="text-secondary mb-0">Browse grouped stock by category path and filter by search text.</p>
     </div>
     <div class="page-actions-group">
-      <a class="btn btn-primary" href="/add/" data-requires-write>Add item</a>
+      <a class="btn btn-primary" href="/add/" data-requires-write id="btnAddItem">Add item</a>
     </div>
   </div>
   <div class="content-panel p-3 p-lg-4">
@@ -103,6 +103,10 @@
       activeCatId = catId || "all";
       syncUrl();
       if (sidebarApi) sidebarApi.setActiveCategory(activeCatId);
+      var btnAdd = document.getElementById("btnAddItem");
+      if (btnAdd) {
+        btnAdd.href = activeCatId && activeCatId !== "all" ? "/add/?category=" + encodeURIComponent(activeCatId) : "/add/";
+      }
       var categorySelect = document.getElementById("categoryFilterSelect");
       if (categorySelect.querySelector('option[value="' + activeCatId + '"]')) {
         categorySelect.value = activeCatId;
@@ -147,7 +151,9 @@
         groups[groupName].forEach(function (category) {
           var option = document.createElement("option");
           option.value = category.id;
-          option.textContent = ims.formatCategoryLeaf(category);
+          // `collectLeafCategories()` returns leaf objects shaped like {id, label, full_name}
+          // (not full Category model objects). Render using label/path instead.
+          option.textContent = (category.label || "").split(" > ").join(" / ") || category.full_name || String(category.id);
           optgroup.appendChild(option);
         });
         select.appendChild(optgroup);
@@ -224,10 +230,6 @@
       subtitle.textContent = (row.categoryPath || "—") + " / " + (row.groupLabel || "—");
 
       var items = findMatchingItems(row);
-      if (items.length === 1) {
-        window.location.href = "/edit/?id=" + encodeURIComponent(items[0].id);
-        return;
-      }
 
       var body = document.getElementById("manageGroupBody");
       body.innerHTML = "";
@@ -239,7 +241,10 @@
           "<td>" + ims.escapeHtml(it.quantity) + "</td>",
           "<td>" + ims.statusBadge(it.status) + "</td>",
           "<td><small class=\"text-secondary\">" + ims.escapeHtml(it.remark || "—") + "</small></td>",
-          "<td class=\"text-end\"><a class=\"btn btn-sm btn-primary\" href=\"/edit/?id=" + encodeURIComponent(it.id) + "\" data-requires-write>Edit</a></td>",
+          "<td class=\"text-end\"><div class=\"d-flex flex-wrap gap-2 justify-content-end\">"
+          + "<a class=\"btn btn-sm btn-primary\" href=\"/edit/?id=" + encodeURIComponent(it.id) + "\" data-requires-write>Edit</a>"
+          + "<button type=\"button\" class=\"btn btn-sm btn-outline-danger\" data-requires-write data-remove-item=\"1\" data-item-id=\"" + String(it.id) + "\">Remove</button>"
+          + "</div></td>",
         ].join("");
         body.appendChild(tr);
       });
@@ -248,6 +253,34 @@
         else body.innerHTML = '<tr><td colspan="5" class="text-center text-secondary p-3">No items found for this group.</td></tr>';
       }
       if (items.length) ims.applyPermissionVisibility(document.getElementById("manageGroupModal"), currentUser);
+
+      body.querySelectorAll("[data-remove-item]").forEach(function (btn) {
+        btn.addEventListener("click", function (e) {
+          e.preventDefault();
+          e.stopPropagation();
+          var itemId = btn.getAttribute("data-item-id");
+          if (!itemId) return;
+          if (!window.confirm("Remove this item?")) return;
+
+          ims.api
+            .delete("/items/" + itemId + "/")
+            .then(function () {
+              ims.showToast("Item removed", "success");
+              allItems = (allItems || []).filter(function (x) {
+                return String(x.id) !== String(itemId);
+              });
+              if (sidebarApi && typeof sidebarApi.setCategoryCounts === "function") {
+                sidebarApi.setCategoryCounts(ims.countItemsByCategory(allItems));
+              }
+              renderRows();
+              if (manageModal) manageModal.hide();
+            })
+            .catch(function (ex) {
+              var msg = (ex.response && ex.response.data && JSON.stringify(ex.response.data)) || "Delete failed";
+              ims.showToast(msg, "danger");
+            });
+        });
+      });
       manageModal.show();
     }
 
