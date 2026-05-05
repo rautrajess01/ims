@@ -5,7 +5,7 @@
   <div class="page-actions page-header">
     <div>
       <h1 class="h3 mb-1">Inventory</h1>
-      <p class="text-secondary mb-0">Browse stock by category and filter by search text.</p>
+      <p class="text-secondary mb-0">Browse grouped stock by category path and filter by search text.</p>
     </div>
     <div class="page-actions-group">
       <a class="btn btn-primary" href="/add/" data-requires-write>Add item</a>
@@ -18,7 +18,7 @@
           type="search"
           class="form-control"
           id="searchQ"
-          placeholder="Search fields and remark…"
+          placeholder="Search category, fields and remark…"
         />
       </div>
       <div class="col-lg-7 text-lg-end">
@@ -36,7 +36,7 @@
           <tr id="tableHeadRow"></tr>
         </thead>
         <tbody id="tblBody">
-          <tr><td colspan="8" class="p-3"><div class="ims-loading" style="height:18px"></div></td></tr>
+          <tr><td colspan="4" class="p-3"><div class="ims-loading" style="height:18px"></div></td></tr>
         </tbody>
       </table>
     </div>
@@ -78,17 +78,6 @@
       renderRows();
     }
 
-    function getActiveCategoryNode() {
-      if (activeCatId === "all") return null;
-      return ims.findCategoryById(categoryTree, activeCatId);
-    }
-
-    function getActiveSchema() {
-      var category = getActiveCategoryNode();
-      if (!category || !category.is_leaf) return [];
-      return category.custom_fields || [];
-    }
-
     function buildSearchBlob(item) {
       var customText = Object.keys(item.custom_values || {}).map(function (key) {
         return String(item.custom_values[key]);
@@ -119,25 +108,31 @@
       if (select.querySelector('option[value="' + activeCatId + '"]')) select.value = activeCatId;
     }
 
-    function renderTableHead(schema) {
+    function renderTableHead() {
       var head = document.getElementById("tableHeadRow");
       head.innerHTML = "";
-      ["Category"].concat(schema.map(function (field) {
-        return field.label || field.name;
-      })).concat(["Qty", "Status", "Updated", ""]).forEach(function (label) {
+      ["Path", "Stock", "Item rows", "Updated"].forEach(function (label) {
         var th = document.createElement("th");
         th.textContent = label;
         head.appendChild(th);
       });
     }
 
-    function renderRows() {
-      var tb = document.getElementById("tblBody");
-      tb.innerHTML = "";
+    function formatCategoryPath(category) {
+      var path = category && (category.full_name || category.name);
+      return path ? path.split(" > ").join("/") + "/" : "—";
+    }
+
+    function formatGroupedPath(item) {
+      var categoryPath = formatCategoryPath(item.category);
+      var itemName = (item.display_name || "").trim();
+      if (!itemName || itemName.indexOf("Item #") === 0 || itemName === "Inventory item") return categoryPath;
+      return categoryPath + itemName + "/";
+    }
+
+    function buildGroupedRows() {
       var q = (document.getElementById("searchQ").value || "").toLowerCase();
-      var schema = getActiveSchema();
-      var colCount = 5 + schema.length;
-      renderTableHead(schema);
+      var grouped = {};
 
       allItems.forEach(function (it) {
         if (
@@ -147,58 +142,54 @@
 
         if (q && buildSearchBlob(it).indexOf(q) < 0) return;
 
-        var tr = document.createElement("tr");
-        var actions = '<a class="btn btn-sm btn-outline-primary" href="/item/?id=' + it.id + '">View</a>';
-        if (ims.canManageInventory(currentUser)) {
-          actions += ' <a class="btn btn-sm btn-outline-secondary" href="/edit/?id=' + it.id + '">Edit</a>';
-          actions += ' <button class="btn btn-sm btn-outline-success" type="button" data-quick-edit="' + it.id + '">Quick update</button>';
+        var key = String(it.category.id) + "::" + String((it.display_name || "").trim()).toLowerCase();
+        if (!grouped[key]) {
+          grouped[key] = {
+            groupedPath: formatGroupedPath(it),
+            quantity: 0,
+            itemRows: 0,
+            lastUpdated: it.last_updated || null,
+          };
         }
-        var cells = [
-          "<td><small>" + ims.escapeHtml((it.category && (it.category.full_name || it.category.name)) || "—") + "</small></td>",
-        ];
-        schema.forEach(function (field) {
-          cells.push("<td>" + ims.formatCustomFieldValue(field, it.custom_values || {}) + "</td>");
-        });
-        cells = cells.concat([
-          "<td>" + ims.escapeHtml(it.quantity) + "</td>",
-          "<td>" + ims.statusBadge(it.status) + "</td>",
-          "<td><small>" + ims.escapeHtml(it.last_updated ? new Date(it.last_updated).toLocaleString() : "—") + "</small></td>",
-          "<td>" + actions + "</td>",
-        ]);
-        tr.innerHTML = cells.join("");
+
+        grouped[key].quantity += Number(it.quantity) || 0;
+        grouped[key].itemRows += 1;
+
+        if (it.last_updated && (!grouped[key].lastUpdated || new Date(it.last_updated) > new Date(grouped[key].lastUpdated))) {
+          grouped[key].lastUpdated = it.last_updated;
+        }
+      });
+
+      return Object.keys(grouped).map(function (key) {
+        return grouped[key];
+      }).sort(function (a, b) {
+        return a.groupedPath.localeCompare(b.groupedPath);
+      });
+    }
+
+    function renderRows() {
+      var tb = document.getElementById("tblBody");
+      tb.innerHTML = "";
+      var groupedRows = buildGroupedRows();
+      var colCount = 4;
+      renderTableHead();
+
+      groupedRows.forEach(function (row) {
+        var tr = document.createElement("tr");
+        tr.innerHTML = [
+          "<td><small>" + ims.escapeHtml(row.groupedPath) + "</small></td>",
+          "<td>" + ims.escapeHtml(row.quantity) + "</td>",
+          "<td>" + ims.escapeHtml(row.itemRows) + "</td>",
+          "<td><small>" + ims.escapeHtml(row.lastUpdated ? new Date(row.lastUpdated).toLocaleString() : "—") + "</small></td>",
+        ].join("");
         tb.appendChild(tr);
       });
+
       if (!tb.children.length) {
-        if (window.imsUi) window.imsUi.setEmptyRow(tb, colCount, "No matching inventory items.");
-        else tb.innerHTML = '<tr><td colspan="' + colCount + '" class="text-center text-secondary p-4">No matching inventory items.</td></tr>';
+        if (window.imsUi) window.imsUi.setEmptyRow(tb, colCount, "No matching grouped inventory.");
+        else tb.innerHTML = '<tr><td colspan="' + colCount + '" class="text-center text-secondary p-4">No matching grouped inventory.</td></tr>';
       }
       syncUrl();
-
-      tb.querySelectorAll("[data-quick-edit]").forEach(function (btn) {
-        btn.addEventListener("click", function () {
-          var id = btn.getAttribute("data-quick-edit");
-          var item = allItems.find(function (row) { return String(row.id) === String(id); });
-          if (!item) return;
-          var nextQty = window.prompt("New quantity", String(item.quantity));
-          if (nextQty === null) return;
-          var note = window.prompt("Activity note", "");
-          if (note === null) return;
-          var qty = Number(nextQty);
-          if (Number.isNaN(qty) || qty < 0) {
-            ims.showToast("Quantity must be 0 or more", "warning");
-            return;
-          }
-          ims.api.patch("/items/" + id + "/", { quantity: qty, log_note: note }).then(function () {
-            ims.showToast("Item updated", "success");
-            return ims.getInventoryItems(true).then(function (items) {
-              allItems = items;
-              renderRows();
-            });
-          }).catch(function (ex) {
-            ims.showToast((ex.response && ex.response.data && JSON.stringify(ex.response.data)) || "Update failed", "danger");
-          });
-        });
-      });
     }
 
     ims.bootstrapPage({ activeNav: "inventory", skipSidebar: true }).then(function (boot) {
