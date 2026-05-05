@@ -1,7 +1,9 @@
 from django.contrib.auth import get_user_model
+from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers
+from simple_history.utils import update_change_reason
 
-from .models import Category, InventoryItem, InventoryLog
+from .models import Category, InventoryItem, InventoryLog, validate_custom_field_schema, validate_custom_values
 
 User = get_user_model()
 
@@ -146,7 +148,8 @@ class CategorySerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Category
-        fields = ("id", "name", "parent", "parent_name", "description", "full_name", "depth", "is_leaf")
+        fields = ("id", "name", "parent", "parent_name", "description", "custom_fields", "full_name", "depth", "is_leaf")
+        validators = []
 
     def validate_parent(self, value):
         instance = getattr(self, "instance", None)
@@ -168,6 +171,7 @@ class CategorySerializer(serializers.ModelSerializer):
         attrs = super().validate(attrs)
         instance = getattr(self, "instance", None)
         parent = attrs.get("parent", getattr(instance, "parent", None))
+        custom_fields = attrs.get("custom_fields", getattr(instance, "custom_fields", []))
 
         depth = 1
         node = parent
@@ -197,10 +201,15 @@ class CategorySerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError(
                     "A category with assigned items cannot become or remain a parent category."
                 )
+        try:
+            attrs["custom_fields"] = validate_custom_field_schema(custom_fields)
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError(exc.message_dict if hasattr(exc, "message_dict") else exc.messages)
         return attrs
 
 
 class CategoryTreeSerializer(serializers.ModelSerializer):
+    parent = serializers.PrimaryKeyRelatedField(read_only=True)
     full_name = serializers.ReadOnlyField()
     depth = serializers.ReadOnlyField()
     is_leaf = serializers.ReadOnlyField()
@@ -209,7 +218,18 @@ class CategoryTreeSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Category
-        fields = ("id", "name", "description", "full_name", "depth", "is_leaf", "item_count", "children")
+        fields = (
+            "id",
+            "name",
+            "parent",
+            "description",
+            "custom_fields",
+            "full_name",
+            "depth",
+            "is_leaf",
+            "item_count",
+            "children",
+        )
 
     def get_item_count(self, obj):
         return obj.items.count() if not obj.children.exists() else 0
@@ -220,17 +240,17 @@ class CategoryTreeSerializer(serializers.ModelSerializer):
 
 class InventoryItemSerializer(serializers.ModelSerializer):
     category = CategorySerializer(read_only=True)
+    display_name = serializers.ReadOnlyField()
 
     class Meta:
         model = InventoryItem
         fields = (
             "id",
             "category",
-            "specs",
-            "capacity",
+            "display_name",
+            "custom_values",
             "quantity",
             "status",
-            "deployed_to",
             "remark",
             "last_updated",
             "created_at",
@@ -238,61 +258,63 @@ class InventoryItemSerializer(serializers.ModelSerializer):
 
 
 class InventoryItemWriteSerializer(serializers.ModelSerializer):
+    log_note = serializers.CharField(write_only=True, required=False, allow_blank=True)
+
     class Meta:
         model = InventoryItem
         fields = (
             "category",
-            "specs",
-            "capacity",
+            "custom_values",
             "quantity",
             "status",
-            "deployed_to",
             "remark",
+            "log_note",
         )
 
     def validate(self, attrs):
         instance = getattr(self, "instance", None)
         if instance is None:
             status_val = attrs.get("status", InventoryItem.Status.IN_STOCK)
-            deployed_to = attrs.get("deployed_to", "")
             category = attrs.get("category")
         else:
             status_val = attrs.get("status", instance.status)
-            deployed_to = attrs.get("deployed_to", instance.deployed_to)
             category = attrs.get("category", instance.category)
-        if status_val == InventoryItem.Status.DEPLOYED:
-            if not (deployed_to and str(deployed_to).strip()):
-                raise serializers.ValidationError(
-                    {"deployed_to": "This field is required when status is deployed."}
-                )
+        custom_values = attrs.get("custom_values", instance.custom_values if instance is not None else {})
         if category is not None and category.children.exists():
             raise serializers.ValidationError(
                 {"category": "Inventory items can only be assigned to leaf categories."}
             )
+        try:
+            attrs["custom_values"] = validate_custom_values(category, custom_values)
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError(exc.message_dict if hasattr(exc, "message_dict") else exc.messages)
         return attrs
 
     def create(self, validated_data):
         user = self.context["request"].user
+        log_note = (validated_data.pop("log_note", "") or "").strip()
         if validated_data.get("quantity", 0) == 0:
             validated_data["status"] = InventoryItem.Status.OUT_OF_STOCK
         item = InventoryItem.objects.create(**validated_data)
+        change_reason = log_note or "Added item"
+        update_change_reason(item, change_reason)
         InventoryLog.objects.create(
             item=item,
             action=InventoryLog.Action.ADDED,
             quantity_before=0,
             quantity_after=item.quantity,
-            deployed_to=item.deployed_to or "",
-            notes="",
+            deployed_to="",
+            notes=change_reason,
             performed_by=user,
         )
         return item
 
     def update(self, instance, validated_data):
         user = self.context["request"].user
+        log_note = (validated_data.pop("log_note", "") or "").strip()
         old_qty = instance.quantity
         old_status = instance.status
         old_remark = instance.remark or ""
-        old_deployed = instance.deployed_to or ""
 
         for attr, val in validated_data.items():
             setattr(instance, attr, val)
@@ -305,74 +327,82 @@ class InventoryItemWriteSerializer(serializers.ModelSerializer):
         new_qty = instance.quantity
         new_status = instance.status
         new_remark = instance.remark or ""
-        new_deployed = instance.deployed_to or ""
 
         logs = []
+        change_fragments = []
 
         if old_status == InventoryItem.Status.DEPLOYED and new_status != InventoryItem.Status.DEPLOYED:
+            change_fragments.append("Returned")
             logs.append(
                 InventoryLog(
                     item=instance,
                     action=InventoryLog.Action.RETURNED,
                     quantity_before=old_qty,
                     quantity_after=new_qty,
-                    deployed_to=old_deployed,
-                    notes="",
+                    deployed_to="",
+                    notes=log_note or "Returned item",
                     performed_by=user,
                 )
             )
 
         if new_status == InventoryItem.Status.DEPLOYED and old_status != InventoryItem.Status.DEPLOYED:
+            change_fragments.append("Deployed")
             logs.append(
                 InventoryLog(
                     item=instance,
                     action=InventoryLog.Action.DEPLOYED,
                     quantity_before=old_qty,
                     quantity_after=new_qty,
-                    deployed_to=new_deployed,
-                    notes="",
+                    deployed_to="",
+                    notes=log_note or "Deployed item",
                     performed_by=user,
                 )
             )
 
         if new_status == InventoryItem.Status.FAULTY and old_status != InventoryItem.Status.FAULTY:
+            change_fragments.append("Marked faulty")
             logs.append(
                 InventoryLog(
                     item=instance,
                     action=InventoryLog.Action.FAULTY,
                     quantity_before=old_qty,
                     quantity_after=new_qty,
-                    deployed_to=new_deployed,
-                    notes="",
+                    deployed_to="",
+                    notes=log_note or "Marked item as faulty",
                     performed_by=user,
                 )
             )
 
         if new_qty != old_qty:
+            change_fragments.append("Quantity changed")
             logs.append(
                 InventoryLog(
                     item=instance,
                     action=InventoryLog.Action.QTY_CHANGED,
                     quantity_before=old_qty,
                     quantity_after=new_qty,
-                    deployed_to=new_deployed,
-                    notes="",
+                    deployed_to="",
+                    notes=log_note or "Quantity updated",
                     performed_by=user,
                 )
             )
 
         if new_remark != old_remark:
+            change_fragments.append("Remark updated")
             logs.append(
                 InventoryLog(
                     item=instance,
                     action=InventoryLog.Action.REMARK_UPDATED,
                     quantity_before=new_qty,
                     quantity_after=new_qty,
-                    deployed_to=new_deployed,
-                    notes="Remark updated",
+                    deployed_to="",
+                    notes=log_note or "Remark updated",
                     performed_by=user,
                 )
             )
+
+        if log_note or change_fragments:
+            update_change_reason(instance, log_note or ", ".join(change_fragments))
 
         if logs:
             InventoryLog.objects.bulk_create(logs)
@@ -382,10 +412,11 @@ class InventoryItemWriteSerializer(serializers.ModelSerializer):
 
 class InventoryLogItemBriefSerializer(serializers.ModelSerializer):
     category = CategorySerializer(read_only=True)
+    display_name = serializers.ReadOnlyField()
 
     class Meta:
         model = InventoryItem
-        fields = ("id", "specs", "category", "status", "quantity")
+        fields = ("id", "display_name", "category", "status", "quantity")
 
 
 class InventoryLogSerializer(serializers.ModelSerializer):

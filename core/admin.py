@@ -41,20 +41,18 @@ class InventoryItemAdmin(SimpleHistoryAdmin):
     list_display = (
         "id",
         "category",
-        "specs",
-        "capacity",
+        "display_name",
         "quantity",
         "status",
-        "deployed_to",
         "last_updated",
     )
     list_filter = ("category", "status")
-    search_fields = ("specs", "capacity", "remark", "deployed_to")
+    search_fields = ("remark",)
 
 
 @admin.register(InventoryLog)
 class InventoryLogAdmin(admin.ModelAdmin):
     list_display = ("id", "item", "action", "quantity_before", "quantity_after", "performed_by", "timestamp")
     list_filter = ("action", "timestamp")
-    search_fields = ("notes", "deployed_to", "item__specs")
+    search_fields = ("notes", "deployed_to", "item__remark")
     readonly_fields = ("timestamp",)

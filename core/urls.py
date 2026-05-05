@@ -7,6 +7,7 @@ from .views import (
     CurrentUserAPIView,
     DashboardAPIView,
     ExportItemsAPIView,
+    ExportLogsAPIView,
     ImportItemsAPIView,
     InventoryItemViewSet,
     InventoryLogViewSet,
@@ -29,6 +30,7 @@ api_v1_patterns = [
     path("auth/me/", CurrentUserAPIView.as_view(), name="auth_me"),
     path("dashboard/", DashboardAPIView.as_view(), name="dashboard"),
     path("export/", ExportItemsAPIView.as_view(), name="export"),
+    path("export-logs/", ExportLogsAPIView.as_view(), name="export_logs"),
     path("import/", ImportItemsAPIView.as_view(), name="import"),
     path("", include(router.urls)),
 ]
@@ -44,6 +46,5 @@ urlpatterns = [
     path("add.html", lambda request: serve_frontend(request, "add.html")),
     path("edit.html", lambda request: serve_frontend(request, "edit.html")),
     path("history.html", lambda request: serve_frontend(request, "history.html")),
-    path("settings.html", lambda request: serve_frontend(request, "settings.html")),
     path("admin-panel.html", lambda request: serve_frontend(request, "admin-panel.html")),
 ]

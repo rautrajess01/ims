@@ -5,53 +5,39 @@
   <div class="page-actions">
     <div>
       <h1 class="h3 mb-1">Dashboard</h1>
-      <p class="text-secondary mb-0">Overview of stock, status, and recent activity.</p>
+      <p class="text-secondary mb-0">Critical inventory attention items.</p>
     </div>
   </div>
-  <div class="row g-3 mb-4" id="summaryCards">
+  <div class="row g-3 mb-3">
     <div class="col-md-4">
-      <div class="card card-soft h-100 shadow-sm">
+      <a class="card card-soft shadow-sm text-decoration-none text-dark" id="kpiLowCard" href="/inventory.html">
         <div class="card-body">
-          <div class="text-secondary small">Total SKUs</div>
-          <div class="display-6" id="totalItems">—</div>
+          <div class="text-secondary small">Low stock items</div>
+          <div class="h4 mb-0" id="kpiLowCount">—</div>
         </div>
-      </div>
+      </a>
     </div>
-  </div>
-  <div class="row g-3 mb-4">
-    <div class="col-lg-12">
-      <div class="card card-soft shadow-sm h-100">
-        <div class="card-header bg-white border-0 pt-4 px-4">By status</div>
-        <div class="card-body pt-0 px-4 pb-4">
-          <ul class="list-group list-group-flush" id="byStatus"></ul>
+    <div class="col-md-4">
+      <a class="card card-soft shadow-sm text-decoration-none text-dark" id="kpiOutCard" href="/inventory.html">
+        <div class="card-body">
+          <div class="text-secondary small">Out of stock items</div>
+          <div class="h4 mb-0" id="kpiOutCount">—</div>
         </div>
-      </div>
+      </a>
+    </div>
+    <div class="col-md-4">
+      <a class="card card-soft shadow-sm text-decoration-none text-dark" id="kpiRecentCard" href="/inventory.html">
+        <div class="card-body">
+          <div class="text-secondary small">Recently updated (7d)</div>
+          <div class="h4 mb-0" id="kpiRecentCount">—</div>
+        </div>
+      </a>
     </div>
   </div>
   <div class="row g-3">
-    <div class="col-lg-7">
+    <div class="col-lg-12">
       <div class="card card-soft shadow-sm">
-        <div class="card-header bg-white border-0 pt-4 px-4">Recent activity</div>
-        <div class="card-body p-0">
-          <div class="table-responsive" style="max-height: 360px">
-            <table class="table table-sm table-hover mb-0">
-              <thead class="table-light sticky-top">
-                <tr>
-                  <th>When</th>
-                  <th>Action</th>
-                  <th>Item</th>
-                  <th>User</th>
-                </tr>
-              </thead>
-              <tbody id="recentBody"></tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-    </div>
-    <div class="col-lg-5">
-      <div class="card card-soft shadow-sm">
-        <div class="card-header bg-white border-0 pt-4 px-4">Low stock (≤ 2)</div>
+        <div class="card-header bg-white border-0 pt-4 px-4">Low Stock</div>
         <div class="card-body p-0">
           <div class="table-responsive" style="max-height: 360px">
             <table class="table table-sm mb-0">
@@ -62,10 +48,16 @@
                   <th></th>
                 </tr>
               </thead>
-              <tbody id="lowStockBody"></tbody>
+              <tbody id="lowStockBody">
+                <tr><td colspan="3" class="p-3"><div class="ims-loading" style="height:18px"></div></td></tr>
+                <tr><td colspan="3" class="p-3"><div class="ims-loading" style="height:18px"></div></td></tr>
+              </tbody>
             </table>
           </div>
         </div>
+      </div>
+      <div class="mt-3 d-none text-center" id="dashboardRetryWrap">
+        <button class="btn btn-outline-secondary btn-sm" id="dashboardRetryBtn" type="button">Retry loading dashboard</button>
       </div>
     </div>
   </div>
@@ -74,65 +66,40 @@
 {% block scripts %}
 <script>
   (function () {
-    ims.bootstrapPage({ activeNav: "dashboard" }).then(function (boot) {
-      if (!boot) return;
-      ims.api
+    function renderDashboard() {
+      var lb = document.getElementById("lowStockBody");
+      var retryWrap = document.getElementById("dashboardRetryWrap");
+      retryWrap.classList.add("d-none");
+
+      if (window.imsUi) window.imsUi.setLoadingRows(lb, 3, 1);
+      document.getElementById("kpiLowCount").textContent = "…";
+      document.getElementById("kpiOutCount").textContent = "…";
+      document.getElementById("kpiRecentCount").textContent = "…";
+      return ims.api
         .get("/dashboard/")
         .then(function (res) {
           var d = res.data;
-          document.getElementById("totalItems").textContent = d.total_items;
-          var cards = document.getElementById("summaryCards");
-          Object.keys(d.count_by_parent_category).forEach(function (k) {
-            var col = document.createElement("div");
-            col.className = "col-md-4 col-xl-3";
-            col.innerHTML =
-              '<div class="card card-soft h-100 shadow-sm"><div class="card-body"><div class="text-secondary small">' +
-              k +
-              '</div><div class="display-6">' +
-              d.count_by_parent_category[k] +
-              "</div></div></div>";
-            cards.appendChild(col);
+          var low = d.low_stock_items || [];
+          var now = Date.now();
+          var recentWindow = 7 * 24 * 60 * 60 * 1000;
+          var recent = low.filter(function (it) {
+            if (!it.last_updated) return false;
+            return now - new Date(it.last_updated).getTime() <= recentWindow;
           });
-          var stEl = document.getElementById("byStatus");
-          stEl.innerHTML = "";
-          Object.keys(d.count_by_status).forEach(function (k) {
-            var li = document.createElement("li");
-            li.className = "list-group-item d-flex justify-content-between align-items-center";
-            li.innerHTML =
-              "<span>" +
-              ims.statusBadge(k) +
-              ' <span class="ms-1">' +
-              k.replace(/_/g, " ") +
-              "</span></span><span>" +
-              d.count_by_status[k] +
-              "</span>";
-            stEl.appendChild(li);
-          });
-          var rb = document.getElementById("recentBody");
-          rb.innerHTML = "";
-          d.recent_logs.forEach(function (log) {
-            var tr = document.createElement("tr");
-            var spec = log.item ? log.item.specs : "—";
-            var user = log.performed_by ? log.performed_by.username : "—";
-            tr.innerHTML =
-              "<td><small>" +
-              new Date(log.timestamp).toLocaleString() +
-              "</small></td><td>" +
-              log.action +
-              "</td><td>" +
-              spec +
-              "</td><td>" +
-              user +
-              "</td>";
-            rb.appendChild(tr);
-          });
-          var lb = document.getElementById("lowStockBody");
+          document.getElementById("kpiLowCount").textContent = low.length;
+          document.getElementById("kpiOutCount").textContent = low.filter(function (it) { return Number(it.quantity) <= 0; }).length;
+          document.getElementById("kpiRecentCount").textContent = recent.length;
           lb.innerHTML = "";
-          d.low_stock_items.forEach(function (it) {
+          if (!low.length) {
+            if (window.imsUi) window.imsUi.setEmptyRow(lb, 3, "No low stock items. Great job.");
+            else lb.innerHTML = '<tr><td colspan="3" class="text-center text-secondary p-4">No low stock items. Great job.</td></tr>';
+            return;
+          }
+          low.forEach(function (it) {
             var tr = document.createElement("tr");
             tr.innerHTML =
               "<td>" +
-              it.specs +
+              (it.display_name || "Inventory item") +
               "</td><td>" +
               it.quantity +
               '</td><td><a class="btn btn-sm btn-outline-primary" href="/item.html?id=' +
@@ -142,8 +109,17 @@
           });
         })
         .catch(function () {
+          if (window.imsUi) window.imsUi.setEmptyRow(lb, 3, "Could not load dashboard data.", "text-danger");
+          else lb.innerHTML = '<tr><td colspan="3" class="text-center text-danger p-4">Could not load dashboard data.</td></tr>';
+          retryWrap.classList.remove("d-none");
           ims.showToast("Could not load dashboard", "danger");
         });
+    }
+
+    ims.bootstrapPage({ activeNav: "dashboard" }).then(function (boot) {
+      if (!boot) return;
+      document.getElementById("dashboardRetryBtn").addEventListener("click", renderDashboard);
+      renderDashboard();
     });
   })();
 </script>

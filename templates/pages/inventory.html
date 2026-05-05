@@ -18,10 +18,13 @@
           type="search"
           class="form-control"
           id="searchQ"
-          placeholder="Search specs, capacity, remark…"
+          placeholder="Search fields and remark…"
         />
       </div>
       <div class="col-lg-7 text-lg-end">
+        <select class="form-select form-select-sm d-inline-block me-2 mb-2" style="width: 240px" id="categoryFilterSelect">
+          <option value="all">All categories</option>
+        </select>
         <button class="btn btn-outline-secondary btn-sm" id="filterAll" type="button">
           Show all categories
         </button>
@@ -30,17 +33,11 @@
     <div class="table-responsive" style="max-height: 70vh">
       <table class="table table-sm table-hover align-middle mb-0">
         <thead class="table-light sticky-top">
-          <tr>
-            <th>Category</th>
-            <th>Specs</th>
-            <th>Capacity</th>
-            <th>Qty</th>
-            <th>Status</th>
-            <th>Deployed to</th>
-            <th></th>
-          </tr>
+          <tr id="tableHeadRow"></tr>
         </thead>
-        <tbody id="tblBody"></tbody>
+        <tbody id="tblBody">
+          <tr><td colspan="8" class="p-3"><div class="ims-loading" style="height:18px"></div></td></tr>
+        </tbody>
       </table>
     </div>
   </div>
@@ -52,6 +49,7 @@
     var params = new URLSearchParams(window.location.search);
     var activeCatId = params.get("category") || "all";
     var allItems = [];
+    var categoryTree = [];
     var descendantsById = {};
     var sidebarApi = null;
     var searchTimer = null;
@@ -61,6 +59,9 @@
       var next = new URL(window.location.href);
       if (activeCatId === "all") next.searchParams.delete("category");
       else next.searchParams.set("category", activeCatId);
+      var q = (document.getElementById("searchQ").value || "").trim();
+      if (!q) next.searchParams.delete("q");
+      else next.searchParams.set("q", q);
       window.history.replaceState({}, "", next.pathname + next.search);
     }
 
@@ -68,13 +69,75 @@
       activeCatId = catId || "all";
       syncUrl();
       if (sidebarApi) sidebarApi.setActiveCategory(activeCatId);
+      var categorySelect = document.getElementById("categoryFilterSelect");
+      if (categorySelect.querySelector('option[value="' + activeCatId + '"]')) {
+        categorySelect.value = activeCatId;
+      } else {
+        categorySelect.value = "all";
+      }
       renderRows();
+    }
+
+    function getActiveCategoryNode() {
+      if (activeCatId === "all") return null;
+      return ims.findCategoryById(categoryTree, activeCatId);
+    }
+
+    function getActiveSchema() {
+      var category = getActiveCategoryNode();
+      if (!category || !category.is_leaf) return [];
+      return category.custom_fields || [];
+    }
+
+    function buildSearchBlob(item) {
+      var customText = Object.keys(item.custom_values || {}).map(function (key) {
+        return String(item.custom_values[key]);
+      }).join(" ");
+      return (
+        ((item.category && (item.category.full_name || item.category.name)) || "") +
+        " " + (item.display_name || "") +
+        " " + (item.remark || "") +
+        " " + customText
+      ).toLowerCase();
+    }
+
+    function renderCategoryFilterOptions() {
+      var select = document.getElementById("categoryFilterSelect");
+      var groups = ims.collectLeafCategories(categoryTree);
+      select.innerHTML = '<option value="all">All categories</option>';
+      Object.keys(groups).forEach(function (groupName) {
+        var optgroup = document.createElement("optgroup");
+        optgroup.label = groupName;
+        groups[groupName].forEach(function (category) {
+          var option = document.createElement("option");
+          option.value = category.id;
+          option.textContent = category.full_name;
+          optgroup.appendChild(option);
+        });
+        select.appendChild(optgroup);
+      });
+      if (select.querySelector('option[value="' + activeCatId + '"]')) select.value = activeCatId;
+    }
+
+    function renderTableHead(schema) {
+      var head = document.getElementById("tableHeadRow");
+      head.innerHTML = "";
+      ["Category"].concat(schema.map(function (field) {
+        return field.label || field.name;
+      })).concat(["Qty", "Status", "Remark", "Updated", ""]).forEach(function (label) {
+        var th = document.createElement("th");
+        th.textContent = label;
+        head.appendChild(th);
+      });
     }
 
     function renderRows() {
       var tb = document.getElementById("tblBody");
       tb.innerHTML = "";
       var q = (document.getElementById("searchQ").value || "").toLowerCase();
+      var schema = getActiveSchema();
+      var colCount = 6 + schema.length;
+      renderTableHead(schema);
 
       allItems.forEach(function (it) {
         if (
@@ -82,35 +145,60 @@
           (descendantsById[String(activeCatId)] || []).indexOf(String(it.category.id)) < 0
         ) return;
 
-        if (q) {
-          var blob =
-            ((it.category && (it.category.full_name || it.category.name)) || "") +
-            " " + (it.specs || "") + " " + (it.capacity || "") + " " + (it.remark || "");
-          if (blob.toLowerCase().indexOf(q) < 0) return;
-        }
+        if (q && buildSearchBlob(it).indexOf(q) < 0) return;
 
         var tr = document.createElement("tr");
         var actions = '<a class="btn btn-sm btn-outline-primary" href="/item.html?id=' + it.id + '">View</a>';
         if (ims.canManageInventory(currentUser)) {
           actions += ' <a class="btn btn-sm btn-outline-secondary" href="/edit.html?id=' + it.id + '">Edit</a>';
+          actions += ' <button class="btn btn-sm btn-outline-success" type="button" data-quick-edit="' + it.id + '">Quick update</button>';
         }
-        tr.innerHTML =
-          "<td><small>" +
-          ((it.category && (it.category.full_name || it.category.name)) || "—") +
-          "</small></td><td>" +
-          it.specs +
-          "</td><td>" +
-          (it.capacity || "—") +
-          "</td><td>" +
-          it.quantity +
-          "</td><td>" +
-          ims.statusBadge(it.status) +
-          "</td><td><small>" +
-          (it.deployed_to || "—") +
-          "</small></td><td>" +
-          actions +
-          "</td>";
+        var cells = [
+          "<td><small>" + ((it.category && (it.category.full_name || it.category.name)) || "—") + "</small></td>",
+        ];
+        schema.forEach(function (field) {
+          cells.push("<td>" + ims.formatCustomFieldValue(field, it.custom_values || {}) + "</td>");
+        });
+        cells = cells.concat([
+          "<td>" + it.quantity + "</td>",
+          "<td>" + ims.statusBadge(it.status) + "</td>",
+          "<td><small>" + (it.remark || "—") + "</small></td>",
+          "<td><small>" + (it.last_updated ? new Date(it.last_updated).toLocaleString() : "—") + "</small></td>",
+          "<td>" + actions + "</td>",
+        ]);
+        tr.innerHTML = cells.join("");
         tb.appendChild(tr);
+      });
+      if (!tb.children.length) {
+        if (window.imsUi) window.imsUi.setEmptyRow(tb, colCount, "No matching inventory items.");
+        else tb.innerHTML = '<tr><td colspan="' + colCount + '" class="text-center text-secondary p-4">No matching inventory items.</td></tr>';
+      }
+      syncUrl();
+
+      tb.querySelectorAll("[data-quick-edit]").forEach(function (btn) {
+        btn.addEventListener("click", function () {
+          var id = btn.getAttribute("data-quick-edit");
+          var item = allItems.find(function (row) { return String(row.id) === String(id); });
+          if (!item) return;
+          var nextQty = window.prompt("New quantity", String(item.quantity));
+          if (nextQty === null) return;
+          var note = window.prompt("Activity note", "");
+          if (note === null) return;
+          var qty = Number(nextQty);
+          if (Number.isNaN(qty) || qty < 0) {
+            ims.showToast("Quantity must be 0 or more", "warning");
+            return;
+          }
+          ims.api.patch("/items/" + id + "/", { quantity: qty, log_note: note }).then(function () {
+            ims.showToast("Item updated", "success");
+            return ims.getInventoryItems(true).then(function (items) {
+              allItems = items;
+              renderRows();
+            });
+          }).catch(function (ex) {
+            ims.showToast((ex.response && ex.response.data && JSON.stringify(ex.response.data)) || "Update failed", "danger");
+          });
+        });
       });
     }
 
@@ -118,13 +206,14 @@
       if (!boot) return;
       currentUser = boot.user;
       return Promise.all([ims.getCategoryTree(), ims.getInventoryItems()]).then(function (res) {
-        var tree = res[0];
+        categoryTree = res[0];
         allItems = res[1];
-        descendantsById = ims.buildCategoryIndexes(tree).descendantsById;
+        descendantsById = ims.buildCategoryIndexes(categoryTree).descendantsById;
+        renderCategoryFilterOptions();
         return ims.initSidebar({
           activeNav: "inventory",
           activeCategoryId: activeCatId,
-          categoryTree: tree,
+          categoryTree: categoryTree,
           categoryCounts: ims.countItemsByCategory(allItems),
           currentUser: currentUser,
           onCategorySelect: function (categoryId) {
@@ -132,6 +221,8 @@
           },
         }).then(function (sidebar) {
           sidebarApi = sidebar;
+          document.getElementById("searchQ").value = params.get("q") || "";
+          setActiveCategory(activeCatId);
           renderRows();
         });
       });
@@ -146,6 +237,10 @@
     document.getElementById("searchQ").addEventListener("input", function () {
       clearTimeout(searchTimer);
       searchTimer = setTimeout(renderRows, 180);
+    });
+
+    document.getElementById("categoryFilterSelect").addEventListener("change", function () {
+      setActiveCategory(this.value);
     });
   })();
 </script>

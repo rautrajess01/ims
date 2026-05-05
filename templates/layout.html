@@ -24,16 +24,17 @@
     {% block head_extra %}{% endblock %}
   </head>
   <body>
+    <div class="ims-session-pill d-none" id="readOnlyPill">Read-only mode</div>
     {% if show_sidebar|default:True %}
     <div class="app-shell" id="appShell">
       <aside class="app-sidebar no-transition" id="appSidebar">
         <div class="sidebar-inner">
           <div class="sidebar-top">
             <div class="sidebar-brand">
-              <span class="sidebar-brand-mark">IM</span>
+              <span class="sidebar-brand-mark"><i class="bi bi-boxes"></i></span>
               <div class="sidebar-brand-name">
                 <div class="fw-semibold">Inventory IMS</div>
-                <div class="small text-white-50">Asset control</div>
+                <div class="small sidebar-brand-subtitle">Asset control</div>
               </div>
             </div>
             <button class="sidebar-toggle" id="sidebarToggle" type="button" aria-label="Toggle sidebar">
@@ -43,40 +44,26 @@
 
           <nav class="sidebar-nav">
             <a class="sidebar-nav-link" href="/" data-nav="dashboard" data-tooltip="Dashboard">
-              <i class="bi bi-speedometer2 sidebar-icon"></i>
+              <i class="bi bi-grid-1x2-fill sidebar-icon"></i>
               <span class="sidebar-label">Dashboard</span>
             </a>
 
             <div class="sidebar-inventory-row">
               <div class="sidebar-inventory-head" data-nav="inventory">
                 <a class="inventory-head-main" href="/inventory.html" data-nav-link="inventory" data-tooltip="Inventory">
-                  <i class="bi bi-box-seam sidebar-icon"></i>
+                  <i class="bi bi-archive-fill sidebar-icon"></i>
                   <span class="sidebar-label">Inventory</span>
                 </a>
-                <button class="inventory-toggle-btn" type="button" id="inventoryTreeToggle" aria-label="Toggle categories">
-                  <i class="bi bi-chevron-down inventory-toggle-icon"></i>
-                </button>
-              </div>
-              <div class="sidebar-tree-expanded">
-                <div class="sidebar-tree-list" id="sidebarTreeExpanded"></div>
-              </div>
-              <div class="sidebar-tree-floating">
-                <div class="sidebar-tree-list" id="sidebarTreeFloating"></div>
               </div>
             </div>
 
-            <a class="sidebar-nav-link" href="/history.html" data-nav="history" data-tooltip="History / Audit Log">
-              <i class="bi bi-clock-history sidebar-icon"></i>
-              <span class="sidebar-label">History / Audit Log</span>
-            </a>
-
-            <a class="sidebar-nav-link" href="/settings.html" data-nav="settings" data-tooltip="Settings">
-              <i class="bi bi-gear sidebar-icon"></i>
-              <span class="sidebar-label">Settings</span>
+            <a class="sidebar-nav-link" href="/history.html" data-nav="history" data-tooltip="Logs">
+              <i class="bi bi-journal-richtext sidebar-icon"></i>
+              <span class="sidebar-label">Logs</span>
             </a>
 
             <a class="sidebar-nav-link d-none" href="/admin-panel.html" id="sidebarAdminLink" data-nav="admin" data-tooltip="Administration">
-              <i class="bi bi-shield-lock sidebar-icon"></i>
+              <i class="bi bi-sliders2-vertical sidebar-icon"></i>
               <span class="sidebar-label">Administration</span>
             </a>
           </nav>
@@ -117,8 +104,23 @@
       </div>
     </div>
 
+    <div class="modal fade" id="commandPaletteModal" tabindex="-1" aria-hidden="true">
+      <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content command-palette">
+          <div class="modal-body p-0">
+            <div class="command-palette-head">
+              <i class="bi bi-search"></i>
+              <input class="form-control command-palette-input" id="commandPaletteInput" placeholder="Search pages or actions..." />
+            </div>
+            <div class="list-group list-group-flush command-palette-list" id="commandPaletteList"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/axios@1.7.7/dist/axios.min.js"></script>
+    <script src="/static/js/modules/ui-utils.js"></script>
     <script src="/static/js/api.js"></script>
     {% block scripts %}{% endblock %}
   </body>

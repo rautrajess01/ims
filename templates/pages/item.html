@@ -8,30 +8,43 @@
       <h1 class="h4" id="titleSpecs">—</h1>
       <p class="text-secondary mb-1" id="titleCat">—</p>
       <div class="row g-2 small">
-        <div class="col-md-3"><strong>Capacity</strong><br /><span id="fCap">—</span></div>
         <div class="col-md-3"><strong>Quantity</strong><br /><span id="fQty">—</span></div>
         <div class="col-md-3"><strong>Status</strong><br /><span id="fSt">—</span></div>
-        <div class="col-md-3"><strong>Deployed to</strong><br /><span id="fDep">—</span></div>
+        <div class="col-md-3"><strong>Updated</strong><br /><span id="fUpd">—</span></div>
       </div>
+      <div class="row g-2 small mt-1 d-none" id="customFieldsSection"></div>
       <p class="mt-3 mb-0"><strong>Remark</strong><br /><span id="fRem">—</span></p>
       <a class="btn btn-primary btn-sm mt-3" id="btnEdit" href="#" data-requires-write>Edit</a>
     </div>
   </div>
   <div class="row g-4">
     <div class="col-lg-6">
-      <h2 class="h5">Model history</h2>
-      <div class="timeline" id="histTimeline"></div>
+      <div class="content-panel p-3 p-lg-4 h-100">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+          <div>
+            <h2 class="h5 mb-1">Model history</h2>
+            <p class="text-secondary small mb-0">Snapshot trail for this item.</p>
+          </div>
+        </div>
+        <div class="timeline item-history-timeline" id="histTimeline"></div>
+      </div>
     </div>
     <div class="col-lg-6">
-      <h2 class="h5">Activity log</h2>
-      <div class="content-panel p-3">
+      <div class="content-panel p-3 p-lg-4 h-100">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+          <div>
+            <h2 class="h5 mb-1">Activity log</h2>
+            <p class="text-secondary small mb-0">Recorded actions and quantity changes.</p>
+          </div>
+        </div>
         <div class="table-responsive" style="max-height: 420px">
-          <table class="table table-sm mb-0">
+          <table class="table table-sm align-middle mb-0 item-log-table">
             <thead class="table-light sticky-top">
               <tr>
                 <th>When</th>
                 <th>Action</th>
                 <th>Δ Qty</th>
+                <th>Note</th>
               </tr>
             </thead>
             <tbody id="logBody"></tbody>
@@ -60,31 +73,38 @@
         ims.api.get("/items/" + id + "/logs/?page_size=200"),
       ]).then(function (res) {
         var it = res[0].data;
-        document.getElementById("titleSpecs").textContent = it.specs;
+        document.getElementById("titleSpecs").textContent = it.display_name || "Inventory item";
         document.getElementById("titleCat").textContent = it.category ? it.category.full_name || it.category.name : "";
-        document.getElementById("fCap").textContent = it.capacity || "—";
         document.getElementById("fQty").textContent = it.quantity;
         document.getElementById("fSt").innerHTML = ims.statusBadge(it.status);
-        document.getElementById("fDep").textContent = it.deployed_to || "—";
+        document.getElementById("fUpd").textContent = it.last_updated ? new Date(it.last_updated).toLocaleString() : "—";
         document.getElementById("fRem").textContent = it.remark || "—";
+        var customSection = document.getElementById("customFieldsSection");
+        customSection.innerHTML = "";
+        (it.category.custom_fields || []).forEach(function (field) {
+          var col = document.createElement("div");
+          col.className = "col-md-3";
+          col.innerHTML = "<strong>" + (field.label || field.name) + "</strong><br /><span>" +
+            ims.formatCustomFieldValue(field, it.custom_values || {}) + "</span>";
+          customSection.appendChild(col);
+        });
+        customSection.classList.toggle("d-none", !(it.category.custom_fields || []).length);
 
         var hist = ims.results(res[1].data);
         var ht = document.getElementById("histTimeline");
         ht.innerHTML = "";
         hist.forEach(function (h) {
           var div = document.createElement("div");
-          div.className = "timeline-item";
+          div.className = "timeline-item timeline-item-card";
           var when = h.history_date ? new Date(h.history_date).toLocaleString() : "";
+          var note = h.history_change_reason || "";
           div.innerHTML =
-            '<div class="small text-secondary">' +
-            when +
-            "</div><div>Qty " +
-            h.quantity +
-            " · " +
-            ims.statusBadge(h.status) +
-            '</div><div class="small">' +
-            (h.history_change_reason || "") +
-            "</div>";
+            '<div class="d-flex justify-content-between align-items-start gap-3">' +
+            '<div><div class="small text-secondary text-uppercase item-history-eyebrow">Update</div>' +
+            '<div class="fw-semibold">' + when + '</div></div>' +
+            '<span class="item-history-qty">Qty ' + h.quantity + "</span></div>" +
+            '<div class="mt-2">' + ims.statusBadge(h.status) + "</div>" +
+            (note ? '<div class="small text-secondary mt-2">' + note + "</div>" : "");
           ht.appendChild(div);
         });
 
@@ -93,16 +113,17 @@
         lb.innerHTML = "";
         logs.forEach(function (log) {
           var tr = document.createElement("tr");
+          var actionLabel = String(log.action || "").replace(/_/g, " ");
           tr.innerHTML =
-            "<td><small>" +
+            '<td><div class="small text-secondary">Recorded</div><div class="fw-semibold">' +
             new Date(log.timestamp).toLocaleString() +
-            "</small></td><td>" +
-            log.action +
-            "</td><td>" +
+            "</div></td><td><span class=\"badge rounded-pill text-bg-light border text-dark text-capitalize\">" +
+            actionLabel +
+            "</span></td><td><span class=\"item-history-qty\">" +
             log.quantity_before +
             " → " +
             log.quantity_after +
-            "</td>";
+            '</span></td><td><small>' + ((log.notes || "—").replace(/</g, "&lt;")) + "</small></td>";
           lb.appendChild(tr);
         });
       }).catch(function () {

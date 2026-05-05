@@ -4,7 +4,7 @@ from django.db.models import ProtectedError
 from rest_framework import status
 from rest_framework.test import APITestCase
 
-from .models import Category, InventoryItem
+from .models import Category, InventoryItem, InventoryLog
 
 User = get_user_model()
 
@@ -22,8 +22,6 @@ class CategoryHierarchyTests(APITestCase):
             "/api/v1/items/",
             {
                 "category": parent.id,
-                "specs": "DDR4",
-                "capacity": "16GB",
                 "quantity": 4,
                 "status": InventoryItem.Status.IN_STOCK,
             },
@@ -48,8 +46,6 @@ class CategoryHierarchyTests(APITestCase):
         root = Category.objects.create(name="Standalone")
         InventoryItem.objects.create(
             category=root,
-            specs="Loose cable",
-            capacity="",
             quantity=1,
             status=InventoryItem.Status.IN_STOCK,
         )
@@ -63,8 +59,6 @@ class CategoryHierarchyTests(APITestCase):
         item_category = Category.objects.create(name="Delete Item Category")
         InventoryItem.objects.create(
             category=item_category,
-            specs="Samsung",
-            capacity="1TB",
             quantity=2,
             status=InventoryItem.Status.IN_STOCK,
         )
@@ -88,6 +82,46 @@ class CategoryHierarchyTests(APITestCase):
         self.assertEqual(node["children"][0]["full_name"], "API Root > API Leaf")
         self.assertTrue(node["children"][0]["is_leaf"])
 
+    def test_category_serializer_validates_custom_field_schema(self):
+        self.user.is_superuser = True
+        self.user.save(update_fields=["is_superuser"])
+        self.client.force_authenticate(self.user)
+
+        bad_response = self.client.post(
+            "/api/v1/categories/",
+            {
+                "name": "Bad Schema",
+                "custom_fields": [{"name": "Serial Number", "type": "string"}],
+            },
+            format="json",
+        )
+
+        self.assertEqual(bad_response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("snake_case", str(bad_response.data["custom_fields"]))
+
+        good_response = self.client.post(
+            "/api/v1/categories/",
+            {
+                "name": "Switches",
+                "custom_fields": [
+                    {"name": "serial_number", "label": "Serial number", "type": "string", "required": True},
+                    {
+                        "name": "port_speed",
+                        "label": "Port speed",
+                        "type": "choice",
+                        "required": False,
+                        "choices": ["1G", "10G"],
+                        "unit": "",
+                    },
+                ],
+            },
+            format="json",
+        )
+
+        self.assertEqual(good_response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(good_response.data["custom_fields"][0]["name"], "serial_number")
+        self.assertEqual(good_response.data["custom_fields"][1]["choices"], ["1G", "10G"])
+
 
 class RoleAndAdminApiTests(APITestCase):
     def setUp(self):
@@ -99,7 +133,19 @@ class RoleAndAdminApiTests(APITestCase):
             is_staff=True,
         )
         self.regular = User.objects.create_user(username="reader", email="reader@example.com", password="secret123")
-        self.category = Category.objects.create(name="Switches")
+        self.category = Category.objects.create(
+            name="Switches",
+            custom_fields=[
+                {
+                    "name": "serial_number",
+                    "label": "Serial number",
+                    "type": "string",
+                    "required": False,
+                    "choices": [],
+                    "unit": "",
+                }
+            ],
+        )
 
     def test_auth_me_returns_current_role(self):
         self.client.force_authenticate(self.superuser)
@@ -117,8 +163,6 @@ class RoleAndAdminApiTests(APITestCase):
             "/api/v1/items/",
             {
                 "category": self.category.id,
-                "specs": "Cisco 9300",
-                "capacity": "",
                 "quantity": 1,
                 "status": InventoryItem.Status.IN_STOCK,
             },
@@ -134,8 +178,6 @@ class RoleAndAdminApiTests(APITestCase):
             "/api/v1/items/",
             {
                 "category": self.category.id,
-                "specs": "Cisco 9300",
-                "capacity": "",
                 "quantity": 1,
                 "status": InventoryItem.Status.IN_STOCK,
             },
@@ -143,6 +185,69 @@ class RoleAndAdminApiTests(APITestCase):
         )
 
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
+    def test_inventory_item_write_serializer_validates_custom_values(self):
+        self.category.custom_fields = [
+            {"name": "serial_number", "label": "Serial number", "type": "string", "required": True, "choices": [], "unit": ""},
+            {"name": "ports", "label": "Ports", "type": "integer", "required": False, "choices": [], "unit": ""},
+            {"name": "managed", "label": "Managed", "type": "boolean", "required": True, "choices": [], "unit": ""},
+        ]
+        self.category.save()
+        self.client.force_authenticate(self.staff)
+
+        bad_response = self.client.post(
+            "/api/v1/items/",
+            {
+                "category": self.category.id,
+                "quantity": 1,
+                "status": InventoryItem.Status.IN_STOCK,
+                "custom_values": {"ports": "48"},
+            },
+            format="json",
+        )
+
+        self.assertEqual(bad_response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("serial_number", str(bad_response.data["custom_values"]))
+
+        good_response = self.client.post(
+            "/api/v1/items/",
+            {
+                "category": self.category.id,
+                "quantity": 1,
+                "status": InventoryItem.Status.IN_STOCK,
+                "custom_values": {"serial_number": "SN-100", "ports": 48, "managed": True},
+            },
+            format="json",
+        )
+
+        self.assertEqual(good_response.status_code, status.HTTP_201_CREATED)
+        item = InventoryItem.objects.get(category=self.category, custom_values__serial_number="SN-100")
+        self.assertEqual(item.custom_values["ports"], 48)
+
+    def test_inventory_item_update_persists_activity_note(self):
+        item = InventoryItem.objects.create(
+            category=self.category,
+            custom_values={"serial_number": "SW-01"},
+            quantity=5,
+            status=InventoryItem.Status.IN_STOCK,
+        )
+        self.client.force_authenticate(self.staff)
+
+        response = self.client.patch(
+            f"/api/v1/items/{item.id}/",
+            {
+                "quantity": 3,
+                "log_note": "Moved to lab rack A2",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        item.refresh_from_db()
+        latest_log = item.logs.order_by("-timestamp").first()
+        self.assertEqual(latest_log.action, InventoryLog.Action.QTY_CHANGED)
+        self.assertEqual(latest_log.notes, "Moved to lab rack A2")
+        self.assertEqual(item.history.first().history_change_reason, "Moved to lab rack A2")
 
     def test_non_superuser_cannot_access_admin_user_api(self):
         self.client.force_authenticate(self.staff)
@@ -181,8 +286,6 @@ class RoleAndAdminApiTests(APITestCase):
         self.client.force_authenticate(self.superuser)
         InventoryItem.objects.create(
             category=self.category,
-            specs="Dell R740",
-            capacity="",
             quantity=1,
             status=InventoryItem.Status.IN_STOCK,
         )
@@ -191,3 +294,64 @@ class RoleAndAdminApiTests(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn("inventory items are assigned", response.data["detail"])
+
+    def test_superuser_can_create_root_category_without_parent(self):
+        self.client.force_authenticate(self.superuser)
+
+        response = self.client.post(
+            "/api/v1/categories/",
+            {
+                "name": "Root From API",
+                "description": "Top level category",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertIsNone(response.data["parent"])
+
+    def test_dashboard_returns_low_stock_items(self):
+        self.client.force_authenticate(self.superuser)
+        InventoryItem.objects.create(
+            category=self.category,
+            custom_values={"serial_number": "Low Switch"},
+            quantity=1,
+            status=InventoryItem.Status.IN_STOCK,
+        )
+        InventoryItem.objects.create(
+            category=self.category,
+            custom_values={"serial_number": "Healthy Switch"},
+            quantity=8,
+            status=InventoryItem.Status.IN_STOCK,
+        )
+
+        response = self.client.get("/api/v1/dashboard/")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        names = [row["display_name"] for row in response.data["low_stock_items"]]
+        self.assertIn("Low Switch", names)
+        self.assertNotIn("Healthy Switch", names)
+
+    def test_staff_can_export_filtered_logs_csv(self):
+        self.client.force_authenticate(self.staff)
+        item = InventoryItem.objects.create(
+            category=self.category,
+            custom_values={"serial_number": "Export Unit"},
+            quantity=2,
+            status=InventoryItem.Status.IN_STOCK,
+        )
+        InventoryLog.objects.create(
+            item=item,
+            action=InventoryLog.Action.ADDED,
+            quantity_before=0,
+            quantity_after=2,
+            deployed_to="",
+            notes="Seed row",
+            performed_by=self.staff,
+        )
+
+        response = self.client.get("/api/v1/export-logs/?action=added")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn("text/csv", response["Content-Type"])
+        self.assertIn("Export Unit", response.content.decode("utf-8"))

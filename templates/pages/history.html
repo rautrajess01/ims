@@ -1,16 +1,23 @@
 {% extends "layout.html" %}
-{% block title %}Audit log — IMS{% endblock %}
+{% block title %}Logs — IMS{% endblock %}
 {% block page %}
 <div class="app-page">
   <div class="page-actions">
     <div>
-      <h1 class="h3 mb-1">Audit log</h1>
-      <p class="text-secondary mb-0">Filter recent inventory changes and operator activity.</p>
+      <h1 class="h3 mb-1">Logs</h1>
+      <p class="text-secondary mb-0">Recent inventory activity in a simpler view.</p>
     </div>
   </div>
   <div class="card card-soft shadow-sm mb-3">
-    <div class="card-body row g-2 small">
-      <div class="col-md-3">
+    <div class="card-body">
+      <div class="d-flex flex-wrap gap-2 mb-3">
+        <button type="button" class="btn btn-sm btn-outline-secondary log-preset" data-range="today">Today</button>
+        <button type="button" class="btn btn-sm btn-outline-secondary log-preset" data-range="week">This week</button>
+        <button type="button" class="btn btn-sm btn-outline-secondary log-preset" data-range="mine">My actions</button>
+        <button type="button" class="btn btn-sm btn-outline-secondary log-preset" data-range="clear">Clear</button>
+      </div>
+      <div class="row g-2 align-items-end small">
+      <div class="col-md-4 col-lg-3">
         <label class="form-label">Action</label>
         <select class="form-select form-select-sm" id="fAction">
           <option value="">Any</option>
@@ -23,24 +30,18 @@
           <option value="remark_updated">remark_updated</option>
         </select>
       </div>
-      <div class="col-md-3">
+      <div class="col-md-4 col-lg-3">
         <label class="form-label">Category</label>
         <select class="form-select form-select-sm" id="fCat"></select>
       </div>
-      <div class="col-md-3">
-        <label class="form-label">From (ISO)</label>
-        <input class="form-control form-control-sm" id="fFrom" placeholder="2026-01-01T00:00:00Z" />
+      <div class="col-md-4 col-lg-3">
+        <label class="form-label">From</label>
+        <input class="form-control form-control-sm" id="fFrom" type="datetime-local" />
       </div>
-      <div class="col-md-3">
-        <label class="form-label">To (ISO)</label>
-        <input class="form-control form-control-sm" id="fTo" placeholder="2026-12-31T23:59:59Z" />
+      <div class="col-lg-3 d-flex gap-2">
+        <button type="button" class="btn btn-sm btn-primary flex-grow-1" id="btnApply">Apply</button>
+        <button type="button" class="btn btn-sm btn-outline-secondary" id="btnExport">Export</button>
       </div>
-      <div class="col-md-3">
-        <label class="form-label">User id</label>
-        <input class="form-control form-control-sm" id="fUser" placeholder="performed_by" />
-      </div>
-      <div class="col-12">
-        <button type="button" class="btn btn-sm btn-primary" id="btnApply">Apply filters</button>
       </div>
     </div>
   </div>
@@ -58,7 +59,9 @@
             <th>Notes</th>
           </tr>
         </thead>
-        <tbody id="tblBody"></tbody>
+        <tbody id="tblBody">
+          <tr><td colspan="7" class="p-3"><div class="ims-loading" style="height:18px"></div></td></tr>
+        </tbody>
       </table>
     </div>
     <nav class="mt-3" id="pager"></nav>
@@ -85,23 +88,38 @@
       var prevUrl = null;
 
       function load(url) {
+        var tb = document.getElementById("tblBody");
+        if (window.imsUi) window.imsUi.setLoadingRows(tb, 7, 1);
+        else tb.innerHTML = '<tr><td colspan="7" class="p-3"><div class="ims-loading" style="height:18px"></div></td></tr>';
         ims.api.get(url || "/logs/?page_size=50&ordering=-timestamp").then(function (res) {
           var d = res.data;
           var rows = ims.results(d);
-          var tb = document.getElementById("tblBody");
           tb.innerHTML = "";
+          var actionMap = {
+            added: "Added",
+            deployed: "Deployed",
+            returned: "Returned",
+            removed: "Removed",
+            faulty: "Marked faulty",
+            qty_changed: "Quantity changed",
+            remark_updated: "Remark updated",
+          };
           rows.forEach(function (log) {
             var tr = document.createElement("tr");
-            var spec = log.item ? log.item.specs : "—";
+            var spec = log.item ? (log.item.display_name || "Inventory item") : "—";
             var cat = log.item && log.item.category ? (log.item.category.full_name || log.item.category.name) : "—";
             var user = log.performed_by ? log.performed_by.username : "—";
             tr.innerHTML =
               "<td><small>" + new Date(log.timestamp).toLocaleString() + "</small></td><td>" +
-              log.action + "</td><td>" + spec + "</td><td>" + cat + "</td><td>" +
+              (actionMap[log.action] || log.action) + "</td><td>" + spec + "</td><td>" + cat + "</td><td>" +
               log.quantity_before + " → " + log.quantity_after + "</td><td>" + user +
               "</td><td><small>" + (log.notes || "").replace(/</g, "&lt;") + "</small></td>";
             tb.appendChild(tr);
           });
+          if (!rows.length) {
+            if (window.imsUi) window.imsUi.setEmptyRow(tb, 7, "No logs match these filters.");
+            else tb.innerHTML = '<tr><td colspan="7" class="text-center text-secondary p-4">No logs match these filters.</td></tr>';
+          }
           nextUrl = d.next;
           prevUrl = d.previous;
           var pg = document.getElementById("pager");
@@ -143,14 +161,46 @@
         var a = document.getElementById("fAction").value;
         var c = document.getElementById("fCat").value;
         var f = document.getElementById("fFrom").value.trim();
-        var t = document.getElementById("fTo").value.trim();
-        var u = document.getElementById("fUser").value.trim();
         if (a) q += "&action=" + encodeURIComponent(a);
         if (c) q += "&category=" + encodeURIComponent(c);
-        if (f) q += "&timestamp_after=" + encodeURIComponent(f);
-        if (t) q += "&timestamp_before=" + encodeURIComponent(t);
-        if (u) q += "&performed_by=" + encodeURIComponent(u);
+        if (f) q += "&timestamp_after=" + encodeURIComponent(new Date(f).toISOString());
         load(q);
+      });
+
+      document.getElementById("btnExport").addEventListener("click", function () {
+        var q = "/export-logs/?ordering=-timestamp";
+        var a = document.getElementById("fAction").value;
+        var c = document.getElementById("fCat").value;
+        var f = document.getElementById("fFrom").value.trim();
+        if (a) q += "&action=" + encodeURIComponent(a);
+        if (c) q += "&category=" + encodeURIComponent(c);
+        if (f) q += "&timestamp_after=" + encodeURIComponent(new Date(f).toISOString());
+        window.location.href = "/api/v1" + q;
+      });
+
+      document.querySelectorAll(".log-preset").forEach(function (btn) {
+        btn.addEventListener("click", function () {
+          var range = btn.getAttribute("data-range");
+          var now = new Date();
+          if (range === "today") {
+            var start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+            document.getElementById("fFrom").value = start.toISOString().slice(0, 16);
+          } else if (range === "week") {
+            var weekStart = new Date(now.getTime() - 6 * 24 * 60 * 60 * 1000);
+            document.getElementById("fFrom").value = weekStart.toISOString().slice(0, 16);
+          } else if (range === "mine") {
+            document.getElementById("fAction").value = "";
+            document.getElementById("fCat").value = "";
+            document.getElementById("fFrom").value = "";
+            load("/logs/?page_size=50&ordering=-timestamp&performed_by=" + encodeURIComponent(boot.user.id));
+            return;
+          } else {
+            document.getElementById("fAction").value = "";
+            document.getElementById("fCat").value = "";
+            document.getElementById("fFrom").value = "";
+          }
+          document.getElementById("btnApply").click();
+        });
       });
 
       load();

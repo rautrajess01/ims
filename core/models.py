@@ -2,6 +2,129 @@ from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
 from simple_history.models import HistoricalRecords
+import re
+
+
+CUSTOM_FIELD_NAME_RE = re.compile(r"^[a-z][a-z0-9_]*$")
+CUSTOM_FIELD_TYPES = {"string", "integer", "float", "boolean", "choice"}
+
+
+def validate_custom_field_schema(schema):
+    if schema in (None, ""):
+        return []
+    if not isinstance(schema, list):
+        raise ValidationError({"custom_fields": "Custom fields must be a list of field definitions."})
+
+    normalized = []
+    seen_names = set()
+
+    for index, field in enumerate(schema):
+        if not isinstance(field, dict):
+            raise ValidationError({"custom_fields": f"Field #{index + 1} must be an object."})
+
+        name = str(field.get("name") or "").strip()
+        label = str(field.get("label") or "").strip()
+        field_type = str(field.get("type") or "").strip()
+        required = bool(field.get("required", False))
+        unit = str(field.get("unit") or "").strip()
+        choices = field.get("choices") or []
+
+        if not name:
+            raise ValidationError({"custom_fields": f"Field #{index + 1} is missing a name."})
+        if not CUSTOM_FIELD_NAME_RE.match(name):
+            raise ValidationError({"custom_fields": f"Field '{name}' must use snake_case."})
+        if name in seen_names:
+            raise ValidationError({"custom_fields": f"Duplicate field name '{name}' is not allowed."})
+        if field_type not in CUSTOM_FIELD_TYPES:
+            raise ValidationError({"custom_fields": f"Field '{name}' has unsupported type '{field_type}'."})
+
+        if not label:
+            label = name.replace("_", " ").title()
+
+        if field_type == "choice":
+            if not isinstance(choices, list) or not choices:
+                raise ValidationError({"custom_fields": f"Choice field '{name}' must define at least one choice."})
+            normalized_choices = []
+            for choice in choices:
+                if isinstance(choice, bool) or isinstance(choice, (list, dict)) or choice is None:
+                    raise ValidationError({"custom_fields": f"Choice field '{name}' has an invalid choice value."})
+                choice_value = str(choice).strip()
+                if not choice_value:
+                    raise ValidationError({"custom_fields": f"Choice field '{name}' cannot contain blank choices."})
+                if choice_value in normalized_choices:
+                    raise ValidationError({"custom_fields": f"Choice field '{name}' contains duplicate choices."})
+                normalized_choices.append(choice_value)
+            choices = normalized_choices
+        elif choices not in ([], None):
+            raise ValidationError({"custom_fields": f"Only choice fields can define choices. Invalid field '{name}'."})
+        else:
+            choices = []
+
+        normalized.append(
+            {
+                "name": name,
+                "label": label,
+                "type": field_type,
+                "required": required,
+                "choices": choices,
+                "unit": unit,
+            }
+        )
+        seen_names.add(name)
+
+    return normalized
+
+
+def validate_custom_values(category, custom_values):
+    if custom_values in (None, ""):
+        custom_values = {}
+    if not isinstance(custom_values, dict):
+        raise ValidationError({"custom_values": "Custom values must be an object keyed by field name."})
+
+    schema = validate_custom_field_schema(category.custom_fields if category else [])
+    field_map = {field["name"]: field for field in schema}
+    normalized = {}
+
+    unknown_fields = sorted(set(custom_values.keys()) - set(field_map.keys()))
+    if unknown_fields:
+        raise ValidationError({"custom_values": [f"Unknown custom field '{name}'." for name in unknown_fields]})
+
+    for name, field in field_map.items():
+        value = custom_values.get(name, None)
+        if value == "":
+            value = None
+
+        if value is None:
+            if field["required"]:
+                raise ValidationError({"custom_values": [f"Field '{name}' is required."]})
+            continue
+
+        field_type = field["type"]
+        if field_type == "string":
+            if not isinstance(value, str):
+                raise ValidationError({"custom_values": [f"Field '{name}' must be a string."]})
+            if field["required"] and not value.strip():
+                raise ValidationError({"custom_values": [f"Field '{name}' is required."]})
+            normalized[name] = value.strip()
+        elif field_type == "integer":
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise ValidationError({"custom_values": [f"Field '{name}' must be an integer."]})
+            normalized[name] = value
+        elif field_type == "float":
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise ValidationError({"custom_values": [f"Field '{name}' must be a number."]})
+            normalized[name] = float(value)
+        elif field_type == "boolean":
+            if not isinstance(value, bool):
+                raise ValidationError({"custom_values": [f"Field '{name}' must be true or false."]})
+            normalized[name] = value
+        elif field_type == "choice":
+            value = str(value).strip()
+            if value not in field["choices"]:
+                raise ValidationError({"custom_values": [f"Field '{name}' must be one of: {', '.join(field['choices'])}."]})
+            normalized[name] = value
+
+    return normalized
 
 
 class Category(models.Model):
@@ -16,6 +139,7 @@ class Category(models.Model):
         related_name="children",
     )
     description = models.TextField(blank=True)
+    custom_fields = models.JSONField(default=list, blank=True)
 
     class Meta:
         ordering = ["parent__name", "name"]
@@ -51,6 +175,7 @@ class Category(models.Model):
 
     def clean(self):
         super().clean()
+        self.custom_fields = validate_custom_field_schema(self.custom_fields)
         if self.parent_id == self.pk and self.pk is not None:
             raise ValidationError({"parent": "A category cannot be its own parent."})
 
@@ -101,15 +226,13 @@ class InventoryItem(models.Model):
         on_delete=models.PROTECT,
         related_name="items",
     )
-    specs = models.CharField(max_length=512)
-    capacity = models.CharField(max_length=128, blank=True)
     quantity = models.PositiveIntegerField(default=0)
+    custom_values = models.JSONField(default=dict, blank=True)
     status = models.CharField(
         max_length=32,
         choices=Status.choices,
         default=Status.IN_STOCK,
     )
-    deployed_to = models.CharField(max_length=255, blank=True)
     remark = models.TextField(blank=True)
     last_updated = models.DateTimeField(auto_now=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -119,12 +242,23 @@ class InventoryItem(models.Model):
         ordering = ["-last_updated"]
 
     def __str__(self):
-        return f"{self.specs} ({self.category})"
+        return f"{self.display_name} ({self.category})"
+
+    @property
+    def display_name(self):
+        schema = validate_custom_field_schema(self.category.custom_fields if self.category_id else [])
+        for field in schema:
+            value = (self.custom_values or {}).get(field["name"])
+            if value not in (None, ""):
+                return str(value)
+        return f"Item #{self.pk}" if self.pk else "Inventory item"
 
     def clean(self):
         super().clean()
         if self.category_id and self.category.children.exists():
             raise ValidationError({"category": "Inventory items can only be assigned to leaf categories."})
+        if self.category_id:
+            self.custom_values = validate_custom_values(self.category, self.custom_values)
 
     def save(self, *args, **kwargs):
         self.full_clean()

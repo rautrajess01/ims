@@ -215,6 +215,128 @@
     return counts;
   }
 
+  function findCategoryById(nodes, targetId) {
+    var match = null;
+    (nodes || []).forEach(function (node) {
+      if (match) return;
+      if (String(node.id) === String(targetId)) {
+        match = node;
+        return;
+      }
+      match = findCategoryById(node.children || [], targetId) || match;
+    });
+    return match;
+  }
+
+  function getCategoryCustomFields(nodes, categoryId) {
+    var category = findCategoryById(nodes, categoryId);
+    return (category && category.custom_fields) || [];
+  }
+
+  function formatCustomFieldValue(field, customValues) {
+    if (!field) return "—";
+    customValues = customValues || {};
+    var value = customValues[field.name];
+    if (value === undefined || value === null || value === "") return "—";
+    if (field.type === "boolean") value = value ? "Yes" : "No";
+    if (field.unit) return value + " " + field.unit;
+    return String(value);
+  }
+
+  function renderCustomFieldInputs(container, schema, values) {
+    if (!container) return;
+    schema = schema || [];
+    values = values || {};
+    container.innerHTML = "";
+    if (!schema.length) {
+      container.classList.add("d-none");
+      return;
+    }
+    container.classList.remove("d-none");
+
+    schema.forEach(function (field) {
+      var wrapper = document.createElement("div");
+      wrapper.className = "mb-3";
+
+      var label = document.createElement("label");
+      label.className = "form-label";
+      label.textContent = field.label || field.name;
+      if (field.required) label.textContent += " *";
+      wrapper.appendChild(label);
+
+      var input;
+      if (field.type === "choice" || field.type === "boolean") {
+        input = document.createElement("select");
+        input.className = "form-select";
+        var empty = document.createElement("option");
+        empty.value = "";
+        empty.textContent = field.required ? "Select an option" : "Optional";
+        input.appendChild(empty);
+        if (field.type === "choice") {
+          (field.choices || []).forEach(function (choice) {
+            var option = document.createElement("option");
+            option.value = choice;
+            option.textContent = choice;
+            input.appendChild(option);
+          });
+        } else {
+          [{ value: "true", label: "Yes" }, { value: "false", label: "No" }].forEach(function (choice) {
+            var option = document.createElement("option");
+            option.value = choice.value;
+            option.textContent = choice.label;
+            input.appendChild(option);
+          });
+        }
+      } else {
+        input = document.createElement("input");
+        input.className = "form-control";
+        input.type = field.type === "integer" || field.type === "float" ? "number" : "text";
+        if (field.type === "float") input.step = "any";
+        if (field.type === "integer") input.step = "1";
+      }
+
+      input.name = "custom__" + field.name;
+      input.dataset.customField = field.name;
+      if (field.required) input.required = true;
+      var currentValue = values[field.name];
+      if (field.type === "boolean") {
+        input.value = currentValue === true ? "true" : currentValue === false ? "false" : "";
+      } else if (currentValue !== undefined && currentValue !== null) {
+        input.value = currentValue;
+      }
+      wrapper.appendChild(input);
+
+      if (field.unit) {
+        var help = document.createElement("div");
+        help.className = "form-text";
+        help.textContent = "Unit: " + field.unit;
+        wrapper.appendChild(help);
+      }
+      container.appendChild(wrapper);
+    });
+  }
+
+  function collectCustomFieldValues(root, schema) {
+    var values = {};
+    (schema || []).forEach(function (field) {
+      var input = root.querySelector('[name="custom__' + field.name + '"]');
+      if (!input) return;
+      var rawValue = input.value;
+      if (rawValue === "") return;
+
+      if (field.type === "integer") {
+        values[field.name] = parseInt(rawValue, 10);
+      } else if (field.type === "float") {
+        values[field.name] = parseFloat(rawValue);
+      } else if (field.type === "boolean") {
+        values[field.name] = rawValue === "true";
+      } else {
+        values[field.name] = rawValue;
+      }
+    });
+    return values;
+  }
+
   function categoryContains(nodes, targetId) {
     var found = false;
     (nodes || []).forEach(function (node) {
@@ -241,7 +363,7 @@
   function getInventoryItems(force) {
     if (force) inventoryItemsPromise = null;
     if (!inventoryItemsPromise) {
-      inventoryItemsPromise = raw.get("/items/?page_size=1000&ordering=specs").then(function (res) {
+      inventoryItemsPromise = raw.get("/items/?page_size=1000&ordering=-last_updated").then(function (res) {
         return results(res.data);
       });
     }
@@ -322,6 +444,81 @@
     el.classList.toggle("d-none", !!hidden);
   }
 
+  function detectActiveNav() {
+    var path = window.location.pathname || "/";
+    if (path === "/" || path.endsWith("/index.html")) return "dashboard";
+    if (path.endsWith("/inventory.html")) return "inventory";
+    if (path.endsWith("/history.html")) return "history";
+    if (path.endsWith("/admin-panel.html")) return "admin";
+    return "";
+  }
+
+  function initCommandPalette(user) {
+    var modalEl = document.getElementById("commandPaletteModal");
+    var input = document.getElementById("commandPaletteInput");
+    var list = document.getElementById("commandPaletteList");
+    if (!modalEl || !input || !list) return;
+
+    var modal = bootstrap.Modal.getOrCreateInstance(modalEl);
+    var commands = [
+      { label: "Go to Dashboard", hint: "Page", action: function () { window.location.href = "/"; } },
+      { label: "Go to Inventory", hint: "Page", action: function () { window.location.href = "/inventory.html"; } },
+      { label: "Go to Logs", hint: "Page", action: function () { window.location.href = "/history.html"; } },
+      { label: "Add Item", hint: "Action", action: function () { window.location.href = "/add.html"; }, requiresWrite: true },
+      { label: "Open Administration", hint: "Page", action: function () { window.location.href = "/admin-panel.html"; }, requiresSuperuser: true },
+      { label: "Toggle Sidebar", hint: "Action", action: function () {
+        var asideToggle = document.getElementById("sidebarToggle");
+        if (asideToggle) asideToggle.click();
+      } },
+      { label: "Logout", hint: "Session", action: logout },
+    ];
+
+    function visibleCommands() {
+      return commands.filter(function (cmd) {
+        if (cmd.requiresSuperuser && !isSuperuser(user)) return false;
+        if (cmd.requiresWrite && !canManageInventory(user)) return false;
+        return true;
+      });
+    }
+
+    function renderCommands(term) {
+      term = (term || "").toLowerCase().trim();
+      list.innerHTML = "";
+      var filtered = visibleCommands().filter(function (cmd) {
+        return !term || cmd.label.toLowerCase().indexOf(term) >= 0;
+      });
+      if (!filtered.length) {
+        list.innerHTML = '<div class="p-3 text-secondary small">No matching commands.</div>';
+        return;
+      }
+      filtered.forEach(function (cmd) {
+        var btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "list-group-item list-group-item-action command-palette-item";
+        btn.innerHTML = "<span>" + cmd.label + "</span><small class='text-secondary'>" + cmd.hint + "</small>";
+        btn.addEventListener("click", function () {
+          modal.hide();
+          cmd.action();
+        });
+        list.appendChild(btn);
+      });
+    }
+
+    document.addEventListener("keydown", function (ev) {
+      if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === "k") {
+        ev.preventDefault();
+        renderCommands("");
+        input.value = "";
+        modal.show();
+        setTimeout(function () { input.focus(); }, 20);
+      }
+    });
+
+    input.addEventListener("input", function () {
+      renderCommands(input.value);
+    });
+  }
+
   function initSidebar(options) {
     options = options || {};
 
@@ -346,6 +543,7 @@
       var activeNav = options.activeNav || "";
       var activeCategoryId = options.activeCategoryId !== undefined ? String(options.activeCategoryId) : "all";
       var openTreeIds = getOpenTreeIds();
+      var didInitActivePath = false;
       var mobileOpen = false;
       var treeExpanded = document.getElementById("sidebarTreeExpanded");
       var treeFloating = document.getElementById("sidebarTreeFloating");
@@ -364,8 +562,19 @@
       }, 100);
 
       function isTreeOpen(node) {
-        if (openTreeIds.indexOf(String(node.id)) >= 0) return true;
-        return categoryContains(node.children || [], activeCategoryId);
+        return openTreeIds.indexOf(String(node.id)) >= 0;
+      }
+
+      function getPathToCategory(nodes, targetId, trail) {
+        trail = trail || [];
+        for (var i = 0; i < (nodes || []).length; i += 1) {
+          var node = nodes[i];
+          var nextTrail = trail.concat([String(node.id)]);
+          if (String(node.id) === String(targetId)) return nextTrail;
+          var nested = getPathToCategory(node.children || [], targetId, nextTrail);
+          if (nested.length) return nested;
+        }
+        return [];
       }
 
       function renderTreeNodes(nodes) {
@@ -381,9 +590,14 @@
               indentClass +
               (isActive ? " active" : "");
             var icon = isParent ? "bi-folder" : "bi-tag";
+            var showLeafCount = !isParent && Number(node.depth) <= 1;
             var arrow = isParent
               ? '<i class="bi ' + (isOpen ? "bi-chevron-down" : "bi-chevron-right") + ' ms-auto"></i>'
-              : '<span class="tree-badge">' + (node.item_count !== undefined ? node.item_count : categoryCounts[String(node.id)] || 0) + "</span>";
+              : (showLeafCount
+                ? '<span class="tree-badge">' +
+                  (node.item_count !== undefined ? node.item_count : categoryCounts[String(node.id)] || 0) +
+                  "</span>"
+                : "");
             var buttonAttrs = isParent
               ? 'type="button" data-tree-toggle="' + node.id + '"'
               : 'type="button" data-category-id="' + node.id + '"';
@@ -421,7 +635,7 @@
         document.documentElement.classList.toggle("sidebar-collapsed", collapsed);
         if (toggleIcon) {
           toggleIcon.className =
-            "bi " + (collapsed && !isMobileSidebar() ? "bi-layout-sidebar" : "bi-layout-sidebar-inset");
+            "bi " + (collapsed && !isMobileSidebar() ? "bi-arrow-right-circle-fill" : "bi-arrow-left-circle-fill");
         }
       }
 
@@ -444,6 +658,12 @@
         if (adminLink) adminLink.classList.toggle("d-none", !isSuperuser(currentUser));
         if (inventoryHead) inventoryHead.classList.toggle("active", activeNav === "inventory");
         if (inventoryMain) inventoryMain.classList.toggle("active", activeNav === "inventory");
+        if (!didInitActivePath && activeCategoryId && activeCategoryId !== "all" && !openTreeIds.length) {
+          var path = getPathToCategory(categoryTree, activeCategoryId, []);
+          openTreeIds = path.slice(0, -1);
+          setOpenTreeIds(openTreeIds);
+          didInitActivePath = true;
+        }
         if (treeExpanded) treeExpanded.innerHTML = renderTreeNodes(categoryTree);
         if (treeFloating) treeFloating.innerHTML = renderTreeNodes(categoryTree);
 
@@ -480,7 +700,7 @@
         mobileToggle.id = "mobileSidebarToggle";
         mobileToggle.className = "mobile-sidebar-toggle";
         mobileToggle.setAttribute("aria-label", "Open sidebar");
-        mobileToggle.innerHTML = '<i class="bi bi-layout-sidebar-inset"></i>';
+        mobileToggle.innerHTML = '<i class="bi bi-list"></i>';
         main.insertBefore(mobileToggle, main.firstChild);
         mobileToggle.addEventListener("click", function () {
           setMobileOpen(true);
@@ -502,23 +722,26 @@
         updateShellState();
       });
 
-      aside.querySelector("#inventoryTreeToggle").addEventListener("click", function (e) {
-        e.preventDefault();
-        e.stopPropagation();
-        var rootIds = categoryTree
-          .filter(function (node) {
-            return node.children && node.children.length;
-          })
-          .map(function (node) {
-            return String(node.id);
+      var inventoryTreeToggle = aside.querySelector("#inventoryTreeToggle");
+      if (inventoryTreeToggle) {
+        inventoryTreeToggle.addEventListener("click", function (e) {
+          e.preventDefault();
+          e.stopPropagation();
+          var rootIds = categoryTree
+            .filter(function (node) {
+              return node.children && node.children.length;
+            })
+            .map(function (node) {
+              return String(node.id);
+            });
+          var allOpen = rootIds.length && rootIds.every(function (id) {
+            return openTreeIds.indexOf(id) >= 0;
           });
-        var allOpen = rootIds.length && rootIds.every(function (id) {
-          return openTreeIds.indexOf(id) >= 0;
+          openTreeIds = allOpen ? [] : rootIds.slice();
+          setOpenTreeIds(openTreeIds);
+          renderSidebar();
         });
-        openTreeIds = allOpen ? [] : rootIds.slice();
-        setOpenTreeIds(openTreeIds);
-        renderSidebar();
-      });
+      }
 
       backdrop.addEventListener("click", function () {
         setMobileOpen(false);
@@ -553,15 +776,19 @@
     Array.prototype.slice.call(root.querySelectorAll("[data-requires-superuser]")).forEach(function (el) {
       toggleHidden(el, !isSuperuser(user));
     });
+    var readOnlyPill = document.getElementById("readOnlyPill");
+    if (readOnlyPill) readOnlyPill.classList.toggle("d-none", canWrite);
   }
 
   function bootstrapPage(options) {
     options = options || {};
     if (!requireAuth()) return Promise.resolve(null);
+    if (!options.activeNav) options.activeNav = detectActiveNav();
     return loadCurrentUser(true).then(function (user) {
       consumeQueuedToast();
       if (!enforcePageAccess(user, options)) return null;
       applyPermissionVisibility(document, user);
+      initCommandPalette(user);
       return Promise.all([
         options.skipSidebar ? Promise.resolve(null) : initSidebar({ activeNav: options.activeNav, currentUser: user }),
         Promise.resolve(user),
@@ -595,6 +822,11 @@
     collectLeafCategories: collectLeafCategories,
     buildCategoryIndexes: buildCategoryIndexes,
     countItemsByCategory: countItemsByCategory,
+    findCategoryById: findCategoryById,
+    getCategoryCustomFields: getCategoryCustomFields,
+    formatCustomFieldValue: formatCustomFieldValue,
+    renderCustomFieldInputs: renderCustomFieldInputs,
+    collectCustomFieldValues: collectCustomFieldValues,
     getCategoryTree: getCategoryTree,
     getInventoryItems: getInventoryItems,
     initSidebar: initSidebar,

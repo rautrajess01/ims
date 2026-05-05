@@ -84,7 +84,7 @@
 </div>
 
 <div class="modal fade" id="categoryModal" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog">
+  <div class="modal-dialog modal-lg">
     <div class="modal-content">
       <form id="categoryForm">
         <div class="modal-header">
@@ -101,6 +101,21 @@
           <div class="mb-3">
             <label class="form-label">Description</label>
             <textarea class="form-control" id="categoryDescription" rows="3"></textarea>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Parent category</label>
+            <select class="form-select" id="categoryParentSelect">
+              <option value="">No parent (top level)</option>
+            </select>
+            <div class="form-text">Changing parent updates hierarchy level. Maximum depth is 3.</div>
+          </div>
+          <div class="mb-0">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+              <label class="form-label mb-0">Fields</label>
+              <button class="btn btn-sm btn-outline-secondary" id="btnAddCustomField" type="button">Add field</button>
+            </div>
+            <div id="categoryCustomFields" class="d-grid gap-2"></div>
+            <div class="form-text">Supported types: string, integer, float, boolean, choice. Choices are comma-separated.</div>
           </div>
         </div>
         <div class="modal-footer">
@@ -163,25 +178,52 @@
     var passwordModal;
     var categoryTree = [];
     var users = [];
+    var expandedCategoryIds = {};
 
     function treeButton(label, icon, className, attrs) {
       return '<button class="btn btn-sm ' + className + '" type="button" ' + attrs + '><i class="bi ' + icon + '"></i> ' + label + "</button>";
     }
 
+    function escapeAttr(value) {
+      return String(value || "")
+        .replace(/&/g, "&amp;")
+        .replace(/"/g, "&quot;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;");
+    }
+
     function renderCategoryTree() {
+      var flatCategories = ims.flattenCategoryTree(categoryTree, []);
       function renderNodes(nodes) {
         return '<div class="d-grid gap-2">' + (nodes || []).map(function (node) {
+          var fieldCount = (node.custom_fields || []).length;
+          var hasChildren = !!(node.children && node.children.length);
+          var isExpanded = !!expandedCategoryIds[String(node.id)];
+          var toggleButton = hasChildren
+            ? '<button class="btn btn-sm btn-outline-secondary" type="button" data-toggle-children="' + node.id + '">' +
+                '<i class="bi ' + (isExpanded ? 'bi-chevron-down' : 'bi-chevron-right') + '"></i>' +
+              "</button>"
+            : "";
           return '<div class="border rounded-4 p-3"><div class="d-flex justify-content-between align-items-start gap-3"><div><div class="fw-semibold">' +
-            node.name + '</div><div class="small text-secondary">' + (node.description || "No description") +
-            '</div></div><div class="d-flex gap-2 flex-wrap">' +
+            (hasChildren ? '<span class="me-2">' + toggleButton + '</span>' : '') + node.name + '</div><div class="small text-secondary">' + (node.description || "No description") +
+            '</div><div class="small text-secondary mt-1">' + fieldCount + ' field' + (fieldCount === 1 ? '' : 's') + '</div></div><div class="d-flex gap-2 flex-wrap">' +
             treeButton("Add child", "bi-folder-plus", "btn-outline-primary", 'data-add-child="' + node.id + '"') +
+            treeButton("Move up", "bi-arrow-up-circle", "btn-outline-info", 'data-move-up="' + node.id + '"') +
+            treeButton("Move top", "bi-arrow-bar-up", "btn-outline-info", 'data-move-top="' + node.id + '"') +
             treeButton("Edit", "bi-pencil", "btn-outline-secondary", 'data-edit-category="' + node.id + '"') +
             treeButton("Delete", "bi-trash", "btn-outline-danger", 'data-delete-category="' + node.id + '"') +
-            "</div></div>" + ((node.children && node.children.length) ? '<div class="mt-3 ms-3">' + renderNodes(node.children) + "</div>" : "") + "</div>";
+            "</div></div>" + (hasChildren && isExpanded ? '<div class="mt-3 ms-3">' + renderNodes(node.children) + "</div>" : "") + "</div>";
         }).join("") + "</div>";
       }
 
       document.getElementById("categoryTreeAdmin").innerHTML = renderNodes(categoryTree);
+      document.querySelectorAll("[data-toggle-children]").forEach(function (btn) {
+        btn.addEventListener("click", function () {
+          var id = String(btn.getAttribute("data-toggle-children"));
+          expandedCategoryIds[id] = !expandedCategoryIds[id];
+          renderCategoryTree();
+        });
+      });
       document.querySelectorAll("[data-add-child]").forEach(function (btn) {
         btn.addEventListener("click", function () { openCategoryModal("child", btn.getAttribute("data-add-child")); });
       });
@@ -190,6 +232,21 @@
       });
       document.querySelectorAll("[data-delete-category]").forEach(function (btn) {
         btn.addEventListener("click", function () { deleteCategory(btn.getAttribute("data-delete-category")); });
+      });
+      document.querySelectorAll("[data-move-up]").forEach(function (btn) {
+        btn.addEventListener("click", function () { moveCategoryUpOneLevel(btn.getAttribute("data-move-up")); });
+      });
+      document.querySelectorAll("[data-move-top]").forEach(function (btn) {
+        btn.addEventListener("click", function () { moveCategoryToTop(btn.getAttribute("data-move-top")); });
+      });
+
+      var parentSelect = document.getElementById("categoryParentSelect");
+      parentSelect.innerHTML = '<option value="">No parent (top level)</option>';
+      flatCategories.forEach(function (cat) {
+        var opt = document.createElement("option");
+        opt.value = cat.id;
+        opt.textContent = cat.full_name || cat.name;
+        parentSelect.appendChild(opt);
       });
     }
 
@@ -250,14 +307,66 @@
       return match;
     }
 
+    function createCustomFieldRow(field) {
+      field = field || {};
+      var row = document.createElement("div");
+      row.className = "border rounded-3 p-3";
+      row.innerHTML =
+        '<div class="row g-2 align-items-end">' +
+        '<div class="col-md-4"><label class="form-label">Name</label><input class="form-control" data-custom-name value="' + escapeAttr(field.name || "") + '" placeholder="serial_number" /></div>' +
+        '<div class="col-md-4"><label class="form-label">Label</label><input class="form-control" data-custom-label value="' + escapeAttr(field.label || "") + '" placeholder="Serial number" /></div>' +
+        '<div class="col-md-4"><label class="form-label">Type</label><select class="form-select" data-custom-type><option value="string">string</option><option value="integer">integer</option><option value="float">float</option><option value="boolean">boolean</option><option value="choice">choice</option></select></div>' +
+        '<div class="col-md-4"><label class="form-label">Choices</label><input class="form-control" data-custom-choices value="' + escapeAttr((field.choices || []).join(", ")) + '" placeholder="1G, 10G, 40G" /></div>' +
+        '<div class="col-md-3"><label class="form-label">Unit</label><input class="form-control" data-custom-unit value="' + escapeAttr(field.unit || "") + '" placeholder="GB" /></div>' +
+        '<div class="col-md-3"><label class="form-label">Required</label><select class="form-select" data-custom-required><option value="true">Required</option><option value="false">Optional</option></select></div>' +
+        '<div class="col-md-2"><button class="btn btn-outline-danger w-100" type="button" data-remove-custom-field>Remove</button></div>' +
+        "</div>";
+      row.querySelector("[data-custom-type]").value = field.type || "string";
+      row.querySelector("[data-custom-required]").value = field.required ? "true" : "false";
+      row.querySelector("[data-remove-custom-field]").addEventListener("click", function () {
+        row.remove();
+      });
+      return row;
+    }
+
+    function renderCustomFieldRows(fields) {
+      var container = document.getElementById("categoryCustomFields");
+      container.innerHTML = "";
+      (fields || []).forEach(function (field) {
+        container.appendChild(createCustomFieldRow(field));
+      });
+    }
+
+    function readCustomFieldRows() {
+      return Array.prototype.slice.call(document.querySelectorAll("#categoryCustomFields > div")).map(function (row) {
+        var choices = row.querySelector("[data-custom-choices]").value
+          .split(",")
+          .map(function (value) { return value.trim(); })
+          .filter(Boolean);
+        return {
+          name: row.querySelector("[data-custom-name]").value.trim(),
+          label: row.querySelector("[data-custom-label]").value.trim(),
+          type: row.querySelector("[data-custom-type]").value,
+          required: row.querySelector("[data-custom-required]").value === "true",
+          choices: choices,
+          unit: row.querySelector("[data-custom-unit]").value.trim(),
+        };
+      }).filter(function (field) {
+        return field.name || field.label || field.choices.length || field.unit;
+      });
+    }
+
     function openCategoryModal(mode, categoryId) {
       var title = document.getElementById("categoryModalTitle");
       document.getElementById("categoryForm").reset();
       document.getElementById("categoryId").value = "";
       document.getElementById("categoryParentId").value = "";
+      document.getElementById("categoryParentSelect").value = "";
+      renderCustomFieldRows([]);
       if (mode === "child") {
         title.textContent = "Add child category";
         document.getElementById("categoryParentId").value = categoryId;
+        document.getElementById("categoryParentSelect").value = categoryId;
       } else if (mode === "edit") {
         var category = findCategoryById(categoryTree, categoryId);
         title.textContent = "Edit category";
@@ -265,6 +374,8 @@
         if (category) {
           document.getElementById("categoryName").value = category.name;
           document.getElementById("categoryDescription").value = category.description || "";
+          document.getElementById("categoryParentSelect").value = category.parent || "";
+          renderCustomFieldRows(category.custom_fields || []);
         }
       } else {
         title.textContent = "Add parent category";
@@ -319,6 +430,31 @@
       });
     }
 
+    function moveCategoryUpOneLevel(categoryId) {
+      var category = findCategoryById(categoryTree, categoryId);
+      if (!category || !category.parent) {
+        ims.showToast("Category is already at top level", "warning");
+        return;
+      }
+      var parent = findCategoryById(categoryTree, category.parent);
+      var nextParent = parent && parent.parent ? parent.parent : null;
+      ims.api.patch("/categories/" + categoryId + "/", { parent: nextParent }).then(function () {
+        ims.showToast("Category moved", "success");
+        return loadCategories();
+      }).catch(function (ex) {
+        ims.showToast((ex.response && ex.response.data && JSON.stringify(ex.response.data)) || "Move failed", "danger");
+      });
+    }
+
+    function moveCategoryToTop(categoryId) {
+      ims.api.patch("/categories/" + categoryId + "/", { parent: null }).then(function () {
+        ims.showToast("Category moved to top level", "success");
+        return loadCategories();
+      }).catch(function (ex) {
+        ims.showToast((ex.response && ex.response.data && JSON.stringify(ex.response.data)) || "Move failed", "danger");
+      });
+    }
+
     function toggleUserActive(userId) {
       var user = users.find(function (entry) { return String(entry.id) === String(userId); });
       if (!user) return;
@@ -345,6 +481,9 @@
 
       document.getElementById("btnAddParentCategory").addEventListener("click", function () { openCategoryModal("parent"); });
       document.getElementById("btnAddUser").addEventListener("click", function () { openUserModal(null); });
+      document.getElementById("btnAddCustomField").addEventListener("click", function () {
+        document.getElementById("categoryCustomFields").appendChild(createCustomFieldRow());
+      });
 
       document.getElementById("categoryForm").addEventListener("submit", function (e) {
         e.preventDefault();
@@ -352,9 +491,14 @@
         var payload = {
           name: document.getElementById("categoryName").value.trim(),
           description: document.getElementById("categoryDescription").value.trim(),
+          custom_fields: readCustomFieldRows(),
         };
-        var parentId = document.getElementById("categoryParentId").value;
-        if (parentId) payload.parent = parseInt(parentId, 10);
+        var parentId = document.getElementById("categoryParentSelect").value || document.getElementById("categoryParentId").value;
+        if (categoryId && String(parentId) === String(categoryId)) {
+          ims.showToast("A category cannot be its own parent", "warning");
+          return;
+        }
+        payload.parent = parentId ? parseInt(parentId, 10) : null;
         var request = categoryId ? ims.api.patch("/categories/" + categoryId + "/", payload) : ims.api.post("/categories/", payload);
         request.then(function () {
           ims.showToast("Category saved", "success");

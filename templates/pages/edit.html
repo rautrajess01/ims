@@ -15,13 +15,8 @@
           <label class="form-label">Category</label>
           <select class="form-select" name="category" required id="selCat"></select>
         </div>
-        <div class="mb-3">
-          <label class="form-label">Specs</label>
-          <input class="form-control" name="specs" required id="fSpecs" />
-        </div>
-        <div class="mb-3">
-          <label class="form-label">Capacity</label>
-          <input class="form-control" name="capacity" id="fCap" />
+        <div id="dynamicFieldsWrap" class="d-none mb-3">
+          <div id="customFieldsContainer"></div>
         </div>
         <div class="mb-3">
           <label class="form-label">Quantity</label>
@@ -38,12 +33,12 @@
           </select>
         </div>
         <div class="mb-3">
-          <label class="form-label">Deployed to</label>
-          <input class="form-control" name="deployed_to" id="fDep" />
-        </div>
-        <div class="mb-3">
           <label class="form-label">Remark</label>
           <textarea class="form-control" name="remark" rows="2" id="fRem"></textarea>
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Activity note</label>
+          <textarea class="form-control" name="log_note" rows="2" placeholder="Moved to this location, corrected stock count, returned from deployment, etc."></textarea>
         </div>
         <button type="submit" class="btn btn-primary">Update</button>
         <a href="/inventory.html" class="btn btn-link">Cancel</a>
@@ -57,6 +52,17 @@
   (function () {
     var params = new URLSearchParams(window.location.search);
     var id = params.get("id");
+    var categoryTree = [];
+    var itemData = null;
+    var currentSchema = [];
+
+    function renderDynamicFields() {
+      var categoryId = document.getElementById("selCat").value;
+      currentSchema = ims.getCategoryCustomFields(categoryTree, categoryId);
+      var existingValues = itemData && String(itemData.category.id) === String(categoryId) ? (itemData.custom_values || {}) : {};
+      ims.renderCustomFieldInputs(document.getElementById("customFieldsContainer"), currentSchema, existingValues);
+      document.getElementById("dynamicFieldsWrap").classList.toggle("d-none", !currentSchema.length);
+    }
 
     ims.bootstrapPage({ activeNav: "inventory", requireWrite: true }).then(function (boot) {
       if (!boot) return;
@@ -65,8 +71,9 @@
         return;
       }
       Promise.all([ims.getCategoryTree(), ims.api.get("/items/" + id + "/")]).then(function (res) {
+        categoryTree = res[0];
         var sel = document.getElementById("selCat");
-        var groups = ims.collectLeafCategories(res[0]);
+        var groups = ims.collectLeafCategories(categoryTree);
         Object.keys(groups).forEach(function (groupName) {
           var og = document.createElement("optgroup");
           og.label = groupName;
@@ -78,14 +85,13 @@
           });
           sel.appendChild(og);
         });
-        var it = res[1].data;
-        sel.value = it.category.id;
-        document.getElementById("fSpecs").value = it.specs;
-        document.getElementById("fCap").value = it.capacity || "";
-        document.getElementById("fQty").value = it.quantity;
-        document.getElementById("selStatus").value = it.status;
-        document.getElementById("fDep").value = it.deployed_to || "";
-        document.getElementById("fRem").value = it.remark || "";
+        itemData = res[1].data;
+        sel.value = itemData.category.id;
+        document.getElementById("fQty").value = itemData.quantity;
+        document.getElementById("selStatus").value = itemData.status;
+        document.getElementById("fRem").value = itemData.remark || "";
+        sel.addEventListener("change", renderDynamicFields);
+        renderDynamicFields();
       });
     });
 
@@ -94,12 +100,11 @@
       var fd = new FormData(e.target);
       var payload = {
         category: parseInt(fd.get("category"), 10),
-        specs: fd.get("specs"),
-        capacity: fd.get("capacity") || "",
+        custom_values: ims.collectCustomFieldValues(e.target, currentSchema),
         quantity: parseInt(fd.get("quantity") || "0", 10),
         status: fd.get("status"),
-        deployed_to: fd.get("deployed_to") || "",
         remark: fd.get("remark") || "",
+        log_note: fd.get("log_note") || "",
       };
       ims.api.patch("/items/" + id + "/", payload).then(function () {
         ims.showToast("Saved", "success");
