@@ -23,7 +23,7 @@ services:
       db:
         condition: service_healthy
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     environment:
       SECRET_KEY: ${SECRET_KEY}
       DEBUG: ${DEBUG}
@@ -35,18 +35,6 @@ services:
       DB_HOST: db
       DB_PORT: 5432
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS}
-    command: >
-      sh -c "
-      python manage.py migrate &&
-      python manage.py collectstatic --noinput &&
-      gunicorn ims.wsgi:application
-      --bind 0.0.0.0:8000
-      --workers 3
-      --threads 2
-      --timeout 120
-      --access-logfile -
-      --error-logfile -
-      "
 
 volumes:
   postgres_data:
