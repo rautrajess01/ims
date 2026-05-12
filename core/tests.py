@@ -1,5 +1,6 @@
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db.models import ProtectedError
 from rest_framework import status
 from rest_framework.test import APITestCase
@@ -22,6 +23,7 @@ class CategoryHierarchyTests(APITestCase):
             "/api/v1/items/",
             {
                 "category": parent.id,
+                "specs": "Some item",
                 "quantity": 4,
                 "status": InventoryItem.Status.IN_STOCK,
             },
@@ -84,46 +86,6 @@ class CategoryHierarchyTests(APITestCase):
         self.assertEqual(node["children"][0]["full_name"], "API Root > API Leaf")
         self.assertTrue(node["children"][0]["is_leaf"])
 
-    def test_category_serializer_validates_custom_field_schema(self):
-        self.user.is_superuser = True
-        self.user.save(update_fields=["is_superuser"])
-        self.client.force_authenticate(self.user)
-
-        bad_response = self.client.post(
-            "/api/v1/categories/",
-            {
-                "name": "Bad Schema",
-                "custom_fields": [{"name": "Serial Number", "type": "string"}],
-            },
-            format="json",
-        )
-
-        self.assertEqual(bad_response.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertIn("snake_case", str(bad_response.data["custom_fields"]))
-
-        good_response = self.client.post(
-            "/api/v1/categories/",
-            {
-                "name": "Switches",
-                "custom_fields": [
-                    {"name": "serial_number", "label": "Serial number", "type": "string", "required": True},
-                    {
-                        "name": "port_speed",
-                        "label": "Port speed",
-                        "type": "choice",
-                        "required": False,
-                        "choices": ["1G", "10G"],
-                        "unit": "",
-                    },
-                ],
-            },
-            format="json",
-        )
-
-        self.assertEqual(good_response.status_code, status.HTTP_201_CREATED)
-        self.assertEqual(good_response.data["custom_fields"][0]["name"], "serial_number")
-        self.assertEqual(good_response.data["custom_fields"][1]["choices"], ["1G", "10G"])
-
 
 class RoleAndAdminApiTests(APITestCase):
     def setUp(self):
@@ -135,19 +97,7 @@ class RoleAndAdminApiTests(APITestCase):
             is_staff=True,
         )
         self.regular = User.objects.create_user(username="reader", email="reader@example.com", password="secret123")
-        self.category = Category.objects.create(
-            name="Switches",
-            custom_fields=[
-                {
-                    "name": "serial_number",
-                    "label": "Serial number",
-                    "type": "string",
-                    "required": False,
-                    "choices": [],
-                    "unit": "",
-                }
-            ],
-        )
+        self.category = Category.objects.create(name="Switches")
 
     def test_auth_me_returns_current_role(self):
         self.client.force_authenticate(self.superuser)
@@ -190,50 +140,118 @@ class RoleAndAdminApiTests(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
 
-    def test_inventory_item_write_serializer_validates_custom_values(self):
-        self.category.custom_fields = [
-            {"name": "serial_number", "label": "Serial number", "type": "string", "required": True, "choices": [], "unit": ""},
-            {"name": "ports", "label": "Ports", "type": "integer", "required": False, "choices": [], "unit": ""},
-            {"name": "managed", "label": "Managed", "type": "boolean", "required": True, "choices": [], "unit": ""},
-        ]
-        self.category.save()
+    def test_inventory_item_create_accepts_capacity(self):
         self.client.force_authenticate(self.staff)
 
-        bad_response = self.client.post(
+        response = self.client.post(
             "/api/v1/items/",
             {
                 "category": self.category.id,
-                "specs": "Bad unit",
-                "quantity": 1,
+                "name": "Test Switch",
+                "specs": "24-port switch",
+                "brand": "Cisco",
+                "capacity_value": 24,
+                "capacity_unit": "ports",
+                "quantity": 5,
                 "status": InventoryItem.Status.IN_STOCK,
-                "custom_values": {"ports": "48"},
             },
             format="json",
         )
 
-        self.assertEqual(bad_response.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertIn("serial_number", str(bad_response.data["custom_values"]))
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        item = InventoryItem.objects.get(id=response.data["id"])
+        self.assertEqual(item.name, "Test Switch")
+        self.assertEqual(item.brand, "Cisco")
+        self.assertEqual(item.capacity_value, 24)
+        self.assertEqual(item.capacity_unit, "ports")
 
-        good_response = self.client.post(
+    def test_inventory_item_create_accepts_image_upload(self):
+        self.client.force_authenticate(self.staff)
+        image = SimpleUploadedFile(
+            "switch.gif",
+            b"GIF87a\x01\x00\x01\x00\x80\x01\x00\x00\x00\x00\xff\xff\xff,\x00\x00\x00\x00\x01\x00\x01\x00\x00\x02\x02D\x01\x00;",
+            content_type="image/gif",
+        )
+
+        response = self.client.post(
             "/api/v1/items/",
             {
                 "category": self.category.id,
-                "specs": "Good unit",
+                "specs": "Photo switch",
                 "quantity": 1,
                 "status": InventoryItem.Status.IN_STOCK,
-                "custom_values": {"serial_number": "SN-100", "ports": 48, "managed": True},
+                "image": image,
+            },
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        item = InventoryItem.objects.get(specs="Photo switch")
+        self.assertTrue(item.image.name.startswith("inventory/"))
+
+    def test_generic_category_rejects_child_data(self):
+        self.client.force_authenticate(self.staff)
+
+        response = self.client.post(
+            "/api/v1/items/",
+            {
+                "category": self.category.id,
+                "specs": "24-port switch",
+                "child_data": {"type": "Managed"},
+                "quantity": 5,
+                "status": InventoryItem.Status.IN_STOCK,
             },
             format="json",
         )
 
-        self.assertEqual(good_response.status_code, status.HTTP_201_CREATED)
-        item = InventoryItem.objects.get(category=self.category, custom_values__serial_number="SN-100")
-        self.assertEqual(item.custom_values["ports"], 48)
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("child_data", response.data)
+
+    def test_inventory_item_create_with_child_data_creates_child(self):
+        self.client.force_authenticate(self.staff)
+        sfp_cat = Category.objects.create(name="SFP", child_type="sfp")
+
+        response = self.client.post(
+            "/api/v1/items/",
+            {
+                "category": sfp_cat.id,
+                "specs": "SFP-1G",
+                "child_data": {"sfp_type": "Multimode"},
+                "quantity": 2,
+                "status": InventoryItem.Status.IN_STOCK,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        item = InventoryItem.objects.get(id=response.data["id"])
+        self.assertIsNotNone(item.get_child())
+        self.assertEqual(item.get_child().sfp_type, "Multimode")
+
+    def test_inventory_item_read_returns_child_data(self):
+        self.client.force_authenticate(self.staff)
+        sfp_cat = Category.objects.create(name="SFP", child_type="sfp")
+        response = self.client.post(
+            "/api/v1/items/",
+            {
+                "category": sfp_cat.id,
+                "specs": "SFP-1G",
+                "child_data": {"sfp_type": "Single-mode"},
+                "quantity": 1,
+                "status": InventoryItem.Status.IN_STOCK,
+            },
+            format="json",
+        )
+        item_id = response.data["id"]
+
+        read_resp = self.client.get(f"/api/v1/items/{item_id}/")
+
+        self.assertEqual(read_resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(read_resp.data["child"]["sfp_type"], "Single-mode")
 
     def test_inventory_item_update_persists_activity_note(self):
         item = InventoryItem.objects.create(
             category=self.category,
-            custom_values={"serial_number": "SW-01"},
             specs="Switch SW-01",
             quantity=5,
             status=InventoryItem.Status.IN_STOCK,
@@ -322,14 +340,12 @@ class RoleAndAdminApiTests(APITestCase):
         self.client.force_authenticate(self.superuser)
         InventoryItem.objects.create(
             category=self.category,
-            custom_values={"serial_number": "Low Switch"},
             specs="Low Switch",
             quantity=1,
             status=InventoryItem.Status.IN_STOCK,
         )
         InventoryItem.objects.create(
             category=self.category,
-            custom_values={"serial_number": "Healthy Switch"},
             specs="Healthy Switch",
             quantity=8,
             status=InventoryItem.Status.IN_STOCK,
@@ -346,7 +362,6 @@ class RoleAndAdminApiTests(APITestCase):
         self.client.force_authenticate(self.staff)
         item = InventoryItem.objects.create(
             category=self.category,
-            custom_values={"serial_number": "Export Unit"},
             specs="Export Unit",
             quantity=2,
             status=InventoryItem.Status.IN_STOCK,

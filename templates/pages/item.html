@@ -3,21 +3,37 @@
 {% block page %}
 <div class="app-page">
   <div class="page-header">
-    <p class="mb-2"><a href="/inventory/">← Back to inventory</a></p>
+    <p class="mb-2"><a class="back-link-button" href="/inventory/" id="backToInventory">← Back to inventory</a></p>
   </div>
   <div class="page-shell">
     <div id="detailCard" class="content-panel p-4">
-      <h1 class="h4" id="titleSpecs">—</h1>
-      <p class="text-secondary mb-1" id="titleCat">—</p>
-      <div class="row g-2 small">
-        <div class="col-md-3"><strong>Capacity</strong><br /><span id="fCap">—</span></div>
-        <div class="col-md-3"><strong>Quantity</strong><br /><span id="fQty">—</span></div>
-        <div class="col-md-3"><strong>Status</strong><br /><span id="fSt">—</span></div>
-        <div class="col-md-3"><strong>Updated</strong><br /><span id="fUpd">—</span></div>
+      <div class="item-detail-head">
+        <div id="itemImageWrap"></div>
+        <div class="flex-grow-1">
+          <h1 class="h4" id="titleSpecs">—</h1>
+          <p class="text-secondary mb-1" id="titleCat">—</p>
+          <div class="row g-2 small">
+            <div class="col-md-3"><strong>Capacity</strong><br /><span id="fCap">—</span></div>
+            <div class="col-md-3"><strong>Quantity</strong><br /><span id="fQty">—</span></div>
+            <div class="col-md-3"><strong>Status</strong><br /><span id="fSt">—</span></div>
+            <div class="col-md-3"><strong>Updated</strong><br /><span id="fUpd">—</span></div>
+          </div>
+          <div class="row g-2 small mt-1">
+            <div class="col-md-3"><strong>Brand</strong><br /><span id="fBrand">—</span></div>
+            <div class="col-md-3"><strong>Name</strong><br /><span id="fName">—</span></div>
+          </div>
+        </div>
       </div>
-      <div class="row g-2 small mt-1 d-none" id="customFieldsSection"></div>
+      <div id="childSection" class="d-none row g-2 small mt-1">
+        <div class="col-12"><hr class="my-2" /></div>
+        <div id="childFieldsContainer" class="d-flex flex-wrap gap-x-4 gap-y-1"></div>
+      </div>
       <p class="mt-3 mb-0"><strong>Remark</strong><br /><span id="fRem">—</span></p>
-      <a class="btn btn-primary btn-sm mt-3" id="btnEdit" href="#" data-requires-write>Edit</a>
+      <p class="mt-2 mb-0"><strong>Activity note</strong><br /><span id="fActNote" class="text-secondary">—</span></p>
+      <div class="d-flex flex-wrap gap-2 mt-3" data-requires-write>
+        <a class="btn btn-primary btn-sm" id="btnEdit" href="#">Edit</a>
+        <button class="btn btn-outline-danger btn-sm" id="btnRemove" type="button">Remove</button>
+      </div>
     </div>
     <div class="row g-4">
       <div class="col-lg-6">
@@ -62,93 +78,104 @@
 {% endblock %}
 {% block scripts %}
 <script>
-  (function () {
-    var params = new URLSearchParams(window.location.search);
-    var id = params.get("id");
-    ims.bootstrapPage({ activeNav: "inventory" }).then(function (boot) {
-      if (!boot) return;
-      if (!id) {
-        ims.showToast("Missing id", "danger");
-        return;
+(function () {
+  var params = new URLSearchParams(window.location.search);
+  var id = params.get("id");
+  var backTo = params.get("back") || "/inventory/";
+  var backLink = document.getElementById("backToInventory");
+  if (backLink) backLink.href = backTo;
+  ims.bootstrapPage({ activeNav: "inventory" }).then(function (boot) {
+    if (!boot) return;
+    if (!id) { ims.showToast("Missing id", "danger"); return; }
+    document.getElementById("btnEdit").href = "/edit/?id=" + id + "&back=" + encodeURIComponent(backTo);
+    Promise.all([
+      ims.api.get("/items/" + id + "/"),
+      ims.api.get("/items/" + id + "/history/?page_size=200"),
+      ims.api.get("/items/" + id + "/logs/?page_size=200"),
+    ]).then(function (res) {
+      var it = res[0].data;
+      var specs = (it.specs || it.name || it.brand || ims.formatCategoryLeaf(it.category) || "Inventory item").trim();
+      document.getElementById("itemImageWrap").innerHTML = ims.renderItemImage(it, "item-thumb-lg");
+      document.getElementById("titleSpecs").textContent = specs;
+      document.getElementById("titleCat").textContent = it.category ? ims.formatCategoryLeaf(it.category) : "—";
+      document.getElementById("fCap").textContent = (it.capacity_display || "").trim() || "—";
+      document.getElementById("fQty").textContent = it.quantity;
+      document.getElementById("fSt").innerHTML = ims.statusBadge(it.status);
+      document.getElementById("fUpd").textContent = it.last_updated ? new Date(it.last_updated).toLocaleString() : "—";
+      document.getElementById("fRem").textContent = it.remark || "—";
+      document.getElementById("fBrand").textContent = it.brand || "—";
+      document.getElementById("fName").textContent = it.name || "—";
+      document.getElementById("fActNote").textContent = it.activity_note || "—";
+
+      var child = it.child || {};
+      var childKeys = Object.keys(child).filter(function (k) { return child[k] !== null && child[k] !== undefined; });
+      var childSection = document.getElementById("childSection");
+      var container = document.getElementById("childFieldsContainer");
+      if (childKeys.length) {
+        childSection.classList.remove("d-none");
+        container.innerHTML = childKeys.map(function (k) {
+          var val = child[k];
+          if (typeof val === "boolean") val = val ? "Yes" : "No";
+          var label = k.replace(/_/g, " ");
+          label = label.charAt(0).toUpperCase() + label.slice(1);
+          return "<div class=\"me-4 mb-1\" style=\"min-width:140px\"><strong>" + ims.escapeHtml(label) + ":</strong><br /><span>" + ims.escapeHtml(String(val)) + "</span></div>";
+        }).join("");
+      } else {
+        childSection.classList.add("d-none");
       }
-      document.getElementById("btnEdit").href = "/edit/?id=" + id;
-      Promise.all([
-        ims.api.get("/items/" + id + "/"),
-        ims.api.get("/items/" + id + "/history/?page_size=200"),
-        ims.api.get("/items/" + id + "/logs/?page_size=200"),
-      ]).then(function (res) {
-        var it = res[0].data;
-        function resolveSpecs(item) {
-          if (!item) return "";
-          if (item.specs !== undefined && item.specs !== null && String(item.specs).trim() !== "") return String(item.specs).trim();
-          var schema = item.category && item.category.custom_fields ? item.category.custom_fields : [];
-          var values = item.custom_values || {};
-          for (var i = 0; i < schema.length; i += 1) {
-            var field = schema[i];
-            var v = values[field.name];
-            if (v !== undefined && v !== null && String(v).trim() !== "") return String(v).trim();
-          }
-          return String(item.display_name || "").trim();
-        }
-        var specs = resolveSpecs(it);
-        document.getElementById("titleSpecs").textContent = specs || ("Item #" + it.id);
-        document.getElementById("titleCat").textContent = (it.category ? ims.formatCategoryLeaf(it.category) : "") + " · Item #" + it.id;
-        document.getElementById("fCap").textContent = (it.capacity || "").trim() || "—";
-        document.getElementById("fQty").textContent = it.quantity;
-        document.getElementById("fSt").innerHTML = ims.statusBadge(it.status);
-        document.getElementById("fUpd").textContent = it.last_updated ? new Date(it.last_updated).toLocaleString() : "—";
-        document.getElementById("fRem").textContent = it.remark || "—";
-        var customSection = document.getElementById("customFieldsSection");
-        customSection.innerHTML = "";
-        (it.category.custom_fields || []).forEach(function (field) {
-          var col = document.createElement("div");
-          col.className = "col-md-3";
-          col.innerHTML = "<strong>" + ims.escapeHtml(field.label || field.name) + "</strong><br /><span>" +
-            ims.escapeHtml(ims.formatCustomFieldValue(field, it.custom_values || {})) + "</span>";
-          customSection.appendChild(col);
-        });
-        customSection.classList.toggle("d-none", !(it.category.custom_fields || []).length);
 
-        var hist = ims.results(res[1].data);
-        var ht = document.getElementById("histTimeline");
-        ht.innerHTML = "";
-        hist.forEach(function (h) {
-          var div = document.createElement("div");
-          div.className = "timeline-item timeline-item-card";
-          var when = h.history_date ? new Date(h.history_date).toLocaleString() : "";
-          var note = h.history_change_reason || "";
-          div.innerHTML =
-            '<div class="d-flex justify-content-between align-items-start gap-3">' +
-            '<div><div class="small text-secondary text-uppercase item-history-eyebrow">Update</div>' +
-            '<div class="fw-semibold">' + ims.escapeHtml(when) + '</div></div>' +
-            '<span class="item-history-qty">Qty ' + ims.escapeHtml(h.quantity) + "</span></div>" +
-            '<div class="mt-2">' + ims.statusBadge(h.status) + "</div>" +
-            (note ? '<div class="small text-secondary mt-2">' + ims.escapeHtml(note) + "</div>" : "");
-          ht.appendChild(div);
-        });
-
-        var logs = ims.results(res[2].data);
-        var lb = document.getElementById("logBody");
-        lb.innerHTML = "";
-        logs.forEach(function (log) {
-          var tr = document.createElement("tr");
-          var actionLabel = String(log.action || "").replace(/_/g, " ");
-          tr.innerHTML =
-            '<td><div class="small text-secondary">Recorded</div><div class="fw-semibold">' +
-            ims.escapeHtml(new Date(log.timestamp).toLocaleString()) +
-            "</div></td><td><span class=\"badge rounded-pill text-bg-light border text-dark text-capitalize\">" +
-            ims.escapeHtml(actionLabel) +
-            "</span></td><td><span class=\"item-history-qty\">" +
-            ims.escapeHtml(log.quantity_before) +
-            " → " +
-            ims.escapeHtml(log.quantity_after) +
-            '</span></td><td><small>' + ims.escapeHtml(log.notes || "—") + "</small></td>";
-          lb.appendChild(tr);
-        });
-      }).catch(function () {
-        ims.showToast("Could not load item", "danger");
+      var hist = ims.results(res[1].data);
+      var ht = document.getElementById("histTimeline");
+      ht.innerHTML = "";
+      hist.forEach(function (h) {
+        var div = document.createElement("div");
+        div.className = "timeline-item timeline-item-card";
+        var when = h.history_date ? new Date(h.history_date).toLocaleString() : "";
+        var note = h.history_change_reason || "";
+        div.innerHTML =
+          '<div class="d-flex justify-content-between align-items-start gap-3">' +
+          '<div><div class="small text-secondary text-uppercase item-history-eyebrow">Update</div>' +
+          '<div class="fw-semibold">' + ims.escapeHtml(when) + '</div></div>' +
+          '<span class="item-history-qty">Qty ' + ims.escapeHtml(h.quantity) + "</span></div>" +
+          '<div class="mt-2">' + ims.statusBadge(h.status) + "</div>" +
+          (note ? '<div class="small text-secondary mt-2">' + ims.escapeHtml(note) + "</div>" : "");
+        ht.appendChild(div);
       });
+
+      var logs = ims.results(res[2].data);
+      var lb = document.getElementById("logBody");
+      lb.innerHTML = "";
+      logs.forEach(function (log) {
+        var tr = document.createElement("tr");
+        var actionLabel = String(log.action || "").replace(/_/g, " ");
+        tr.innerHTML =
+          '<td><div class="small text-secondary">Recorded</div><div class="fw-semibold">' +
+          ims.escapeHtml(new Date(log.timestamp).toLocaleString()) +
+          "</div></td><td><span class=\"badge rounded-pill text-bg-light border text-dark text-capitalize\">" +
+          ims.escapeHtml(actionLabel) +
+          "</span></td><td><span class=\"item-history-qty\">" +
+          ims.escapeHtml(log.quantity_before) + " → " + ims.escapeHtml(log.quantity_after) +
+          '</span></td><td><small>' + ims.escapeHtml(log.notes || "—") + "</small></td>";
+        lb.appendChild(tr);
+      });
+    }).catch(function () {
+      ims.showToast("Could not load item", "danger");
     });
-  })();
+
+    var btnRemove = document.getElementById("btnRemove");
+    if (btnRemove) {
+      btnRemove.addEventListener("click", function () {
+        if (!window.confirm("Remove this item?")) return;
+        ims.api.delete("/items/" + id + "/").then(function () {
+          ims.showToast("Item removed", "success");
+          window.location.href = backTo || "/inventory/";
+        }).catch(function (ex) {
+          var msg = (ex.response && ex.response.data && JSON.stringify(ex.response.data)) || "Delete failed";
+          ims.showToast(msg, "danger");
+        });
+      });
+    }
+  });
+})();
 </script>
 {% endblock %}

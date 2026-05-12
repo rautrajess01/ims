@@ -12,6 +12,7 @@
 
   const raw = axios.create({ baseURL: API_BASE });
   let categoryTreePromise = null;
+  let childTypeSchemasPromise = null;
   let inventoryItemsPromise = null;
   let currentUserPromise = null;
 
@@ -265,8 +266,118 @@
     // User-facing displays prefer leaf category only.
     var categoryPath = formatCategoryLeaf(item.category);
     var itemName = ((item.display_name || "") + "").trim();
-    if (!itemName || itemName.indexOf("Item #") === 0 || itemName === "Inventory item") return categoryPath;
+    if (!itemName || /^Item\s+#/i.test(itemName) || itemName === "Inventory item") return categoryPath;
     return categoryPath + "/" + itemName;
+  }
+
+  function itemImageUrl(item) {
+    return item && item.image ? String(item.image) : "";
+  }
+
+  function renderItemImage(item, extraClass) {
+    var url = itemImageUrl(item);
+    var label = ((item && (item.display_name || item.name || item.specs)) || "Item").trim();
+    var classes = "item-thumb" + (extraClass ? " " + extraClass : "");
+    if (url) {
+      return (
+        '<span class="' + classes + '">' +
+        '<img src="' + escapeHtml(url) + '" alt="' + escapeHtml(label) + '" loading="lazy" />' +
+        "</span>"
+      );
+    }
+    var initial = (label || "I").charAt(0).toUpperCase();
+    return '<span class="' + classes + ' item-thumb-empty" aria-hidden="true">' + escapeHtml(initial) + "</span>";
+  }
+
+  function initImagePicker(options) {
+    options = options || {};
+    var input = document.getElementById(options.inputId || "itemImageInput");
+    var preview = document.getElementById(options.previewId || "itemImagePreview");
+    var cameraBtn = document.getElementById(options.cameraBtnId || "btnCamera");
+    var clearBtn = document.getElementById(options.clearBtnId || "btnClearImage");
+    var clearInput = document.getElementById(options.clearInputId || "imageClearInput");
+    var currentUrl = options.currentUrl || "";
+
+    function setPreview(src) {
+      if (!preview) return;
+      if (src) {
+        preview.innerHTML = '<img src="' + escapeHtml(src) + '" alt="Item image preview" />';
+      } else {
+        preview.innerHTML = '<span class="item-image-placeholder">No image</span>';
+      }
+    }
+
+    function setFile(file) {
+      if (!input || !file) return;
+      var transfer = new DataTransfer();
+      transfer.items.add(file);
+      input.files = transfer.files;
+      if (clearInput) clearInput.value = "false";
+      setPreview(URL.createObjectURL(file));
+    }
+
+    if (input) {
+      input.addEventListener("change", function () {
+        var file = input.files && input.files[0];
+        if (file) {
+          if (clearInput) clearInput.value = "false";
+          setPreview(URL.createObjectURL(file));
+        }
+      });
+    }
+
+    if (clearBtn) {
+      clearBtn.addEventListener("click", function () {
+        if (input) input.value = "";
+        if (clearInput) clearInput.value = "true";
+        setPreview("");
+      });
+    }
+
+    if (cameraBtn) {
+      cameraBtn.addEventListener("click", function () {
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+          if (input) input.click();
+          return;
+        }
+        var overlay = document.createElement("div");
+        overlay.className = "camera-capture-overlay";
+        overlay.innerHTML =
+          '<div class="camera-capture-panel">' +
+          '<video autoplay playsinline></video>' +
+          '<div class="d-flex gap-2 justify-content-end mt-3">' +
+          '<button type="button" class="btn btn-outline-secondary btn-sm" data-camera-cancel>Cancel</button>' +
+          '<button type="button" class="btn btn-primary btn-sm" data-camera-capture>Capture</button>' +
+          "</div></div>";
+        document.body.appendChild(overlay);
+        var video = overlay.querySelector("video");
+        var stream = null;
+        function close() {
+          if (stream) stream.getTracks().forEach(function (track) { track.stop(); });
+          overlay.remove();
+        }
+        navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" } } }).then(function (mediaStream) {
+          stream = mediaStream;
+          video.srcObject = stream;
+        }).catch(function () {
+          close();
+          if (input) input.click();
+        });
+        overlay.querySelector("[data-camera-cancel]").addEventListener("click", close);
+        overlay.querySelector("[data-camera-capture]").addEventListener("click", function () {
+          var canvas = document.createElement("canvas");
+          canvas.width = video.videoWidth || 1280;
+          canvas.height = video.videoHeight || 720;
+          canvas.getContext("2d").drawImage(video, 0, 0, canvas.width, canvas.height);
+          canvas.toBlob(function (blob) {
+            if (blob) setFile(new File([blob], "item-camera.jpg", { type: "image/jpeg" }));
+            close();
+          }, "image/jpeg", 0.9);
+        });
+      });
+    }
+
+    setPreview(currentUrl);
   }
 
   function formatCustomFieldValue(field, customValues) {
@@ -404,6 +515,16 @@
       });
     }
     return inventoryItemsPromise;
+  }
+
+  function getChildTypeSchemas(force) {
+    if (force) childTypeSchemasPromise = null;
+    if (!childTypeSchemasPromise) {
+      childTypeSchemasPromise = raw.get("/categories/child-schemas/").then(function (res) {
+        return res.data || {};
+      });
+    }
+    return childTypeSchemasPromise;
   }
 
   function loadCurrentUser(force) {
@@ -768,6 +889,7 @@
       var v2User = aside.querySelector("#sidebarUser");
       if (v2User) {
         v2User.addEventListener("click", function () {
+          if (getSidebarCollapsed()) return;
           logout();
         });
       }
@@ -900,11 +1022,15 @@
     formatCategoryPath: formatCategoryPath,
     formatCategoryLeaf: formatCategoryLeaf,
     formatItemPath: formatItemPath,
+    itemImageUrl: itemImageUrl,
+    renderItemImage: renderItemImage,
+    initImagePicker: initImagePicker,
     formatCustomFieldValue: formatCustomFieldValue,
     renderCustomFieldInputs: renderCustomFieldInputs,
     collectCustomFieldValues: collectCustomFieldValues,
     getCategoryTree: getCategoryTree,
     getInventoryItems: getInventoryItems,
+    getChildTypeSchemas: getChildTypeSchemas,
     initSidebar: initSidebar,
     applyPermissionVisibility: applyPermissionVisibility,
     bootstrapPage: bootstrapPage,

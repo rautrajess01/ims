@@ -1,137 +1,25 @@
 from django.conf import settings
-from django.core.exceptions import ValidationError
+from django.core.exceptions import ObjectDoesNotExist, ValidationError
 from django.db import models
 from simple_history.models import HistoricalRecords
-import re
 
 
-CUSTOM_FIELD_NAME_RE = re.compile(r"^[a-z][a-z0-9_]*$")
-CUSTOM_FIELD_TYPES = {"string", "integer", "float", "boolean", "choice"}
-RESERVED_ITEM_FIELDS = {"specs", "capacity"}
-
-
-def validate_custom_field_schema(schema):
-    if schema in (None, ""):
-        return []
-    if not isinstance(schema, list):
-        raise ValidationError({"custom_fields": "Custom fields must be a list of field definitions."})
-
-    normalized = []
-    seen_names = set()
-
-    for index, field in enumerate(schema):
-        if not isinstance(field, dict):
-            raise ValidationError({"custom_fields": f"Field #{index + 1} must be an object."})
-
-        name = str(field.get("name") or "").strip()
-        label = str(field.get("label") or "").strip()
-        field_type = str(field.get("type") or "").strip()
-        required = bool(field.get("required", False))
-        unit = str(field.get("unit") or "").strip()
-        choices = field.get("choices") or []
-
-        if not name:
-            raise ValidationError({"custom_fields": f"Field #{index + 1} is missing a name."})
-        if not CUSTOM_FIELD_NAME_RE.match(name):
-            raise ValidationError({"custom_fields": f"Field '{name}' must use snake_case."})
-        if name in RESERVED_ITEM_FIELDS:
-            raise ValidationError({"custom_fields": f"Field name '{name}' is reserved. Use a different name."})
-        if name in seen_names:
-            raise ValidationError({"custom_fields": f"Duplicate field name '{name}' is not allowed."})
-        if field_type not in CUSTOM_FIELD_TYPES:
-            raise ValidationError({"custom_fields": f"Field '{name}' has unsupported type '{field_type}'."})
-
-        if not label:
-            label = name.replace("_", " ").title()
-
-        if field_type == "choice":
-            if not isinstance(choices, list) or not choices:
-                raise ValidationError({"custom_fields": f"Choice field '{name}' must define at least one choice."})
-            normalized_choices = []
-            for choice in choices:
-                if isinstance(choice, bool) or isinstance(choice, (list, dict)) or choice is None:
-                    raise ValidationError({"custom_fields": f"Choice field '{name}' has an invalid choice value."})
-                choice_value = str(choice).strip()
-                if not choice_value:
-                    raise ValidationError({"custom_fields": f"Choice field '{name}' cannot contain blank choices."})
-                if choice_value in normalized_choices:
-                    raise ValidationError({"custom_fields": f"Choice field '{name}' contains duplicate choices."})
-                normalized_choices.append(choice_value)
-            choices = normalized_choices
-        elif choices not in ([], None):
-            raise ValidationError({"custom_fields": f"Only choice fields can define choices. Invalid field '{name}'."})
-        else:
-            choices = []
-
-        normalized.append(
-            {
-                "name": name,
-                "label": label,
-                "type": field_type,
-                "required": required,
-                "choices": choices,
-                "unit": unit,
-            }
-        )
-        seen_names.add(name)
-
-    return normalized
-
-
-def validate_custom_values(category, custom_values):
-    if custom_values in (None, ""):
-        custom_values = {}
-    if not isinstance(custom_values, dict):
-        raise ValidationError({"custom_values": "Custom values must be an object keyed by field name."})
-
-    schema = validate_custom_field_schema(category.custom_fields if category else [])
-    field_map = {field["name"]: field for field in schema}
-    normalized = {}
-
-    unknown_fields = sorted(set(custom_values.keys()) - set(field_map.keys()))
-    if unknown_fields:
-        raise ValidationError({"custom_values": [f"Unknown custom field '{name}'." for name in unknown_fields]})
-
-    for name, field in field_map.items():
-        value = custom_values.get(name, None)
-        if value == "":
-            value = None
-
-        if value is None:
-            if field["required"]:
-                raise ValidationError({"custom_values": [f"Field '{name}' is required."]})
-            continue
-
-        field_type = field["type"]
-        if field_type == "string":
-            if not isinstance(value, str):
-                raise ValidationError({"custom_values": [f"Field '{name}' must be a string."]})
-            if field["required"] and not value.strip():
-                raise ValidationError({"custom_values": [f"Field '{name}' is required."]})
-            normalized[name] = value.strip()
-        elif field_type == "integer":
-            if isinstance(value, bool) or not isinstance(value, int):
-                raise ValidationError({"custom_values": [f"Field '{name}' must be an integer."]})
-            normalized[name] = value
-        elif field_type == "float":
-            if isinstance(value, bool) or not isinstance(value, (int, float)):
-                raise ValidationError({"custom_values": [f"Field '{name}' must be a number."]})
-            normalized[name] = float(value)
-        elif field_type == "boolean":
-            if not isinstance(value, bool):
-                raise ValidationError({"custom_values": [f"Field '{name}' must be true or false."]})
-            normalized[name] = value
-        elif field_type == "choice":
-            value = str(value).strip()
-            if value not in field["choices"]:
-                raise ValidationError({"custom_values": [f"Field '{name}' must be one of: {', '.join(field['choices'])}."]})
-            normalized[name] = value
-
-    return normalized
+CHILD_MODEL_REVERSE_NAMES = []
 
 
 class Category(models.Model):
     MAX_DEPTH = 3
+
+    CHILD_TYPE_CHOICES = [
+        ("", "None (generic)"),
+        ("sfp", "SFP"),
+        ("storage", "Storage"),
+        ("switch", "Switch"),
+        ("cable", "Cable"),
+        ("ram", "RAM"),
+        ("cpu", "CPU"),
+        ("misc", "Miscellaneous"),
+    ]
 
     name = models.CharField(max_length=128)
     parent = models.ForeignKey(
@@ -142,7 +30,10 @@ class Category(models.Model):
         related_name="children",
     )
     description = models.TextField(blank=True)
-    custom_fields = models.JSONField(default=list, blank=True)
+    child_type = models.CharField(
+        max_length=16, choices=CHILD_TYPE_CHOICES, blank=True, default="",
+        help_text="Links this category to a typed child model for structured fields.",
+    )
 
     class Meta:
         ordering = ["parent__name", "name"]
@@ -178,10 +69,8 @@ class Category(models.Model):
 
     def clean(self):
         super().clean()
-        self.custom_fields = validate_custom_field_schema(self.custom_fields)
         if self.parent_id == self.pk and self.pk is not None:
             raise ValidationError({"parent": "A category cannot be its own parent."})
-
         node = self.parent
         depth = 1
         while node is not None:
@@ -189,13 +78,10 @@ class Category(models.Model):
             if node.pk == self.pk:
                 raise ValidationError({"parent": "Circular parent relationship is not allowed."})
             node = node.parent
-
         if depth > self.MAX_DEPTH:
             raise ValidationError({"parent": f"Category hierarchy cannot exceed {self.MAX_DEPTH} levels."})
-
         if self.parent_id and self.parent.items.exists():
             raise ValidationError({"parent": "Cannot add a child under a category that already has items assigned."})
-
         sibling_qs = Category.objects.filter(name=self.name)
         if self.parent_id is None:
             sibling_qs = sibling_qs.filter(parent__isnull=True)
@@ -205,11 +91,8 @@ class Category(models.Model):
             sibling_qs = sibling_qs.exclude(pk=self.pk)
         if sibling_qs.exists():
             raise ValidationError({"name": "A category with this name already exists at this level."})
-
-        if self.pk and self.items.exists():
-            parent_id = self.parent_id if self.parent_id is not None else self.pk
-            if Category.objects.filter(parent_id=parent_id).exclude(pk=self.pk).exists():
-                raise ValidationError("A category with assigned items cannot become or remain a parent category.")
+        if self.pk and self.items.exists() and self.children.exists():
+            raise ValidationError("A category with assigned items cannot become or remain a parent category.")
 
     def save(self, *args, **kwargs):
         self.full_clean()
@@ -229,16 +112,26 @@ class InventoryItem(models.Model):
         on_delete=models.PROTECT,
         related_name="items",
     )
+    name = models.CharField(
+        max_length=256, blank=True, default="",
+        help_text="Human-readable name or model number",
+    )
     specs = models.CharField(max_length=512)
-    capacity = models.CharField(max_length=128, blank=True, default="")
+    brand = models.CharField(max_length=128, blank=True, null=True)
+    capacity_value = models.FloatField(blank=True, null=True)
+    capacity_unit = models.CharField(max_length=32, blank=True, null=True)
     quantity = models.PositiveIntegerField(default=0)
-    custom_values = models.JSONField(default=dict, blank=True)
     status = models.CharField(
         max_length=32,
         choices=Status.choices,
         default=Status.IN_STOCK,
     )
     remark = models.TextField(blank=True)
+    activity_note = models.TextField(blank=True)
+    image = models.ImageField(
+        upload_to="inventory/", blank=True, null=True,
+        help_text="Photo or illustration of the item",
+    )
     last_updated = models.DateTimeField(auto_now=True)
     created_at = models.DateTimeField(auto_now_add=True)
     history = HistoricalRecords()
@@ -247,29 +140,196 @@ class InventoryItem(models.Model):
         ordering = ["-last_updated"]
 
     def __str__(self):
-        return f"{self.display_name} ({self.category})"
+        display = (self.name or self.specs or "").strip()
+        return f"{display or 'Inventory item'} ({self.category})"
 
     @property
     def display_name(self):
-        if (self.specs or "").strip():
-            return str(self.specs).strip()
-        schema = validate_custom_field_schema(self.category.custom_fields if self.category_id else [])
-        for field in schema:
-            value = (self.custom_values or {}).get(field["name"])
-            if value not in (None, ""):
-                return str(value)
-        return f"Item #{self.pk}" if self.pk else "Inventory item"
+        return (self.name or self.specs or "").strip() or "Inventory item"
 
     def clean(self):
         super().clean()
         if self.category_id and self.category.children.exists():
             raise ValidationError({"category": "Inventory items can only be assigned to leaf categories."})
-        if self.category_id:
-            self.custom_values = validate_custom_values(self.category, self.custom_values)
 
     def save(self, *args, **kwargs):
         self.full_clean()
         return super().save(*args, **kwargs)
+
+    def get_child(self):
+        for child_attr in CHILD_MODEL_REVERSE_NAMES:
+            try:
+                return getattr(self, child_attr)
+            except ObjectDoesNotExist:
+                continue
+        return None
+
+
+class SFPItem(models.Model):
+    SFP_TYPE_CHOICES = [
+        ("Electrical", "Electrical"),
+        ("Multimode", "Multimode"),
+        ("Single-mode", "Single-mode"),
+    ]
+    inventory_item = models.OneToOneField(
+        InventoryItem, on_delete=models.CASCADE, related_name="sfp"
+    )
+    sfp_type = models.CharField(
+        max_length=32, choices=SFP_TYPE_CHOICES, blank=True, null=True,
+    )
+    wavelength_nm = models.PositiveIntegerField(blank=True, null=True)
+    max_distance_m = models.PositiveIntegerField(blank=True, null=True)
+    connector_type = models.CharField(max_length=32, blank=True, null=True)
+
+    def __str__(self):
+        return f"SFP: {self.sfp_type or '—'}"
+
+CHILD_MODEL_REVERSE_NAMES.append("sfp")
+
+
+class StorageItem(models.Model):
+    DRIVE_TYPE_CHOICES = [
+        ("HDD", "HDD"),
+        ("SSD", "SSD"),
+        ("NVMe", "NVMe"),
+    ]
+    BRAND_CHOICES = [
+        ("HP", "HP"), ("Dell", "Dell"), ("Seagate", "Seagate"),
+        ("WD", "WD"), ("Samsung", "Samsung"), ("Orico", "Orico"),
+        ("IBM", "IBM"), ("Other", "Other"),
+    ]
+    INTERFACE_CHOICES = [
+        ("SAS", "SAS"), ("SATA", "SATA"),
+        ("NVMe", "NVMe (PCIe)"), ("SFF", "SFF"), ("Other", "Other"),
+    ]
+    inventory_item = models.OneToOneField(
+        InventoryItem, on_delete=models.CASCADE, related_name="storage"
+    )
+    drive_type = models.CharField(
+        max_length=16, choices=DRIVE_TYPE_CHOICES, blank=True, null=True,
+    )
+    brand = models.CharField(
+        max_length=32, choices=BRAND_CHOICES, blank=True, null=True,
+    )
+    interface = models.CharField(
+        max_length=16, choices=INTERFACE_CHOICES, blank=True, null=True,
+    )
+    form_factor = models.CharField(max_length=16, blank=True, null=True)
+    rpm = models.PositiveIntegerField(blank=True, null=True)
+
+    def __str__(self):
+        return f"Storage: {self.brand or '—'} {self.drive_type or '—'}"
+
+CHILD_MODEL_REVERSE_NAMES.append("storage")
+
+
+class SwitchItem(models.Model):
+    BRAND_CHOICES = [
+        ("Cisco", "Cisco"), ("Huawei", "Huawei"),
+        ("Juniper", "Juniper"), ("Other", "Other"),
+    ]
+    inventory_item = models.OneToOneField(
+        InventoryItem, on_delete=models.CASCADE, related_name="switch"
+    )
+    brand = models.CharField(
+        max_length=32, choices=BRAND_CHOICES, blank=True, null=True,
+    )
+    ports_1g = models.PositiveIntegerField(blank=True, null=True)
+    ports_10g = models.PositiveIntegerField(blank=True, null=True)
+    ports_25g = models.PositiveIntegerField(blank=True, null=True)
+    ports_40g = models.PositiveIntegerField(blank=True, null=True)
+    ports_100g = models.PositiveIntegerField(blank=True, null=True)
+    ports_other = models.CharField(max_length=128, blank=True, null=True)
+
+    def __str__(self):
+        return f"Switch: {self.brand or '—'}"
+
+CHILD_MODEL_REVERSE_NAMES.append("switch")
+
+
+class CableItem(models.Model):
+    CABLE_TYPE_CHOICES = [
+        ("Cat5e", "Cat 5e"), ("Cat6", "Cat 6"), ("Cat6A", "Cat 6A"),
+        ("Cat7", "Cat 7"), ("Fiber-MM", "Fiber — Multimode"),
+        ("Fiber-SM", "Fiber — Single-mode"), ("DAC", "DAC / Twinax"),
+        ("Power", "Power Cable"), ("Other", "Other"),
+    ]
+    inventory_item = models.OneToOneField(
+        InventoryItem, on_delete=models.CASCADE, related_name="cable"
+    )
+    cable_type = models.CharField(
+        max_length=32, choices=CABLE_TYPE_CHOICES, blank=True, null=True,
+    )
+    length_m = models.FloatField(blank=True, null=True)
+    connector_a = models.CharField(max_length=32, blank=True, null=True)
+    connector_b = models.CharField(max_length=32, blank=True, null=True)
+
+    def __str__(self):
+        return f"Cable: {self.cable_type or '—'}"
+
+CHILD_MODEL_REVERSE_NAMES.append("cable")
+
+
+class RAMItem(models.Model):
+    MEMORY_TYPE_CHOICES = [
+        ("DDR3", "DDR3"), ("DDR4", "DDR4"), ("DDR5", "DDR5"),
+        ("ECC", "ECC"), ("Other", "Other"),
+    ]
+    FORM_FACTOR_CHOICES = [
+        ("DIMM", "DIMM"), ("SODIMM", "SO-DIMM"),
+        ("LRDIMM", "LRDIMM"), ("RDIMM", "RDIMM"),
+    ]
+    inventory_item = models.OneToOneField(
+        InventoryItem, on_delete=models.CASCADE, related_name="ram"
+    )
+    memory_type = models.CharField(
+        max_length=16, choices=MEMORY_TYPE_CHOICES, blank=True, null=True,
+    )
+    form_factor = models.CharField(
+        max_length=16, choices=FORM_FACTOR_CHOICES, blank=True, null=True,
+    )
+    speed_mhz = models.PositiveIntegerField(blank=True, null=True)
+    ecc = models.BooleanField(default=False)
+
+    def __str__(self):
+        return f"RAM: {self.memory_type or '—'} {self.speed_mhz or ''}MHz"
+
+CHILD_MODEL_REVERSE_NAMES.append("ram")
+
+
+class CPUItem(models.Model):
+    ARCH_CHOICES = [
+        ("x86_64", "x86-64"), ("ARM64", "ARM64 / AArch64"),
+        ("POWER", "IBM POWER"), ("Other", "Other"),
+    ]
+    inventory_item = models.OneToOneField(
+        InventoryItem, on_delete=models.CASCADE, related_name="cpu"
+    )
+    architecture = models.CharField(
+        max_length=16, choices=ARCH_CHOICES, blank=True, null=True,
+    )
+    core_count = models.PositiveIntegerField(blank=True, null=True)
+    thread_count = models.PositiveIntegerField(blank=True, null=True)
+    base_clock_ghz = models.FloatField(blank=True, null=True)
+    socket = models.CharField(max_length=32, blank=True, null=True)
+    tdp_w = models.PositiveIntegerField(blank=True, null=True)
+
+    def __str__(self):
+        return f"CPU: {self.core_count or '?'}c/{self.thread_count or '?'}t"
+
+CHILD_MODEL_REVERSE_NAMES.append("cpu")
+
+
+class MiscItem(models.Model):
+    inventory_item = models.OneToOneField(
+        InventoryItem, on_delete=models.CASCADE, related_name="misc"
+    )
+    item_type = models.CharField(max_length=128, blank=True, null=True)
+
+    def __str__(self):
+        return f"Misc: {self.item_type or '—'}"
+
+CHILD_MODEL_REVERSE_NAMES.append("misc")
 
 
 class InventoryLog(models.Model):
@@ -281,6 +341,7 @@ class InventoryLog(models.Model):
         FAULTY = "faulty", "Faulty"
         QTY_CHANGED = "qty_changed", "Quantity changed"
         REMARK_UPDATED = "remark_updated", "Remark updated"
+        STATUS_CHANGED = "status_changed", "Status changed"
 
     item = models.ForeignKey(
         InventoryItem,

@@ -8,22 +8,55 @@
       <p class="text-secondary mb-0">Create a new inventory record.</p>
     </div>
   </div>
-  <div class="content-panel p-4" style="max-width: 720px">
+  <div class="editor-shell">
+    <div class="content-panel editor-panel p-4">
       <form id="formItem">
         <div class="mb-3">
           <label class="form-label">Category</label>
-          <select class="form-select" name="category" required id="selCat"></select>
+          <select class="form-select" name="category" required id="selCat">
+            <option value="">Loading categories...</option>
+          </select>
+          <div class="form-text d-none" id="categoryEmptyState">No item categories are available.</div>
         </div>
-        <div id="dynamicFieldsWrap" class="d-none mb-3">
-          <div id="customFieldsContainer"></div>
+        <div id="categorySpecificFields" class="d-none mb-3">
+          <hr class="my-3" />
+          <h6 class="text-secondary mb-2">Category-specific fields</h6>
+          <div id="catChildFields"></div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Name</label>
+          <input class="form-control" type="text" name="name" placeholder="e.g. Sky Hynex SFP-1G" />
         </div>
         <div class="mb-3">
           <label class="form-label">Specs</label>
-          <input class="form-control" type="text" name="specs" required placeholder="e.g. Sky Hynex" />
+          <input class="form-control" type="text" name="specs" required placeholder="e.g. 1G SFP module" />
         </div>
         <div class="mb-3">
-          <label class="form-label">Capacity</label>
-          <input class="form-control" type="text" name="capacity" placeholder="e.g. 16 GB / 8 Core / 2.10 GHz" />
+          <label class="form-label">Brand</label>
+          <input class="form-control" type="text" name="brand" placeholder="e.g. Cisco, HP, Seagate" />
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Image</label>
+          <div class="item-image-picker">
+            <div class="item-image-preview" id="itemImagePreview"></div>
+            <div class="flex-grow-1">
+              <input class="form-control" type="file" name="image" id="itemImageInput" accept="image/*" capture="environment" />
+              <div class="d-flex flex-wrap gap-2 mt-2">
+                <button class="btn btn-outline-secondary btn-sm" type="button" id="btnCamera">Use camera</button>
+                <button class="btn btn-outline-secondary btn-sm" type="button" id="btnClearImage">Clear</button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="row g-2 mb-3">
+          <div class="col-md-4">
+            <label class="form-label">Capacity value</label>
+            <input class="form-control" type="number" step="any" name="capacity_value" placeholder="e.g. 16" />
+          </div>
+          <div class="col-md-4">
+            <label class="form-label">Capacity unit</label>
+            <input class="form-control" type="text" name="capacity_unit" placeholder="e.g. GB, GHz, Core" />
+          </div>
         </div>
         <div class="mb-3">
           <label class="form-label">Quantity</label>
@@ -54,83 +87,286 @@
         <button type="submit" class="btn btn-primary">Save</button>
         <a href="/inventory/" class="btn btn-link text-decoration-none">Cancel</a>
       </form>
+    </div>
   </div>
 </div>
 {% endblock %}
 {% block scripts %}
 <script>
-  (function () {
-    var params = new URLSearchParams(window.location.search);
-    var categoryTree = [];
-    var currentSchema = [];
-    var initialCategoryId = params.get("category");
+(function () {
+  var params = new URLSearchParams(window.location.search);
+  var initialCategoryId = params.get("category");
 
-    function renderDynamicFields() {
-      var categoryId = document.getElementById("selCat").value;
-      currentSchema = ims.getCategoryCustomFields(categoryTree, categoryId);
-      ims.renderCustomFieldInputs(document.getElementById("customFieldsContainer"), currentSchema, {});
-      document.getElementById("dynamicFieldsWrap").classList.toggle("d-none", !currentSchema.length);
+  var CHILD_TYPE_SCHEMA = {
+    ram: [
+      { name: "memory_type", label: "Memory type", type: "choice", choices: ["DDR3", "DDR4", "DDR5", "ECC", "Other"] },
+      { name: "form_factor", label: "Form factor", type: "choice", choices: ["DIMM", "SODIMM", "LRDIMM", "RDIMM"] },
+      { name: "speed_mhz", label: "Speed (MHz)", type: "integer" },
+      { name: "ecc", label: "ECC", type: "boolean" },
+    ],
+    cpu: [
+      { name: "architecture", label: "Architecture", type: "choice", choices: ["x86_64", "ARM64", "POWER", "Other"] },
+      { name: "core_count", label: "Core count", type: "integer" },
+      { name: "thread_count", label: "Thread count", type: "integer" },
+      { name: "base_clock_ghz", label: "Base clock (GHz)", type: "float" },
+      { name: "socket", label: "Socket", type: "string" },
+      { name: "tdp_w", label: "TDP (W)", type: "integer" },
+    ],
+    storage: [
+      { name: "drive_type", label: "Drive type", type: "choice", choices: ["HDD", "SSD", "NVMe"] },
+      { name: "brand", label: "Brand", type: "choice", choices: ["HP", "Dell", "Seagate", "WD", "Samsung", "Orico", "IBM", "Other"] },
+      { name: "interface", label: "Interface", type: "choice", choices: ["SAS", "SATA", "NVMe (PCIe)", "SFF", "Other"] },
+      { name: "form_factor", label: "Form factor", type: "string" },
+      { name: "rpm", label: "RPM", type: "integer" },
+    ],
+    sfp: [
+      { name: "sfp_type", label: "SFP type", type: "choice", choices: ["Electrical", "Multimode", "Single-mode"] },
+      { name: "wavelength_nm", label: "Wavelength (nm)", type: "integer" },
+      { name: "max_distance_m", label: "Max distance (m)", type: "integer" },
+      { name: "connector_type", label: "Connector type", type: "string" },
+    ],
+    switch: [
+      { name: "brand", label: "Brand", type: "choice", choices: ["Cisco", "Huawei", "Juniper", "Other"] },
+      { name: "ports_1g", label: "1G ports", type: "integer" },
+      { name: "ports_10g", label: "10G ports", type: "integer" },
+      { name: "ports_25g", label: "25G ports", type: "integer" },
+      { name: "ports_40g", label: "40G ports", type: "integer" },
+      { name: "ports_100g", label: "100G ports", type: "integer" },
+      { name: "ports_other", label: "Other ports", type: "string" },
+    ],
+    misc: [
+      { name: "item_type", label: "Item type", type: "string" },
+    ],
+    cable: [
+      { name: "cable_type", label: "Cable type", type: "choice", choices: ["Cat5e", "Cat6", "Cat6A", "Cat7", "Fiber-MM", "Fiber-SM", "DAC", "Power Cable", "Other"] },
+      { name: "length_m", label: "Length (m)", type: "float" },
+      { name: "connector_a", label: "Connector A", type: "string" },
+      { name: "connector_b", label: "Connector B", type: "string" },
+    ],
+  };
+
+  function renderChildField(field, currentValue) {
+    var wrapper = document.createElement("div");
+    wrapper.className = "mb-3";
+
+    var label = document.createElement("label");
+    label.className = "form-label";
+    label.textContent = field.label || field.name;
+    wrapper.appendChild(label);
+
+    var input;
+    if (field.type === "choice") {
+      input = document.createElement("select");
+      input.className = "form-select";
+      var empty = document.createElement("option");
+      empty.value = "";
+      empty.textContent = "Select an option";
+      input.appendChild(empty);
+      (field.choices || []).forEach(function (choice) {
+        var option = document.createElement("option");
+        option.value = choice;
+        option.textContent = choice;
+        if (currentValue === choice) option.selected = true;
+        input.appendChild(option);
+      });
+    } else if (field.type === "boolean") {
+      input = document.createElement("select");
+      input.className = "form-select";
+      var empty = document.createElement("option");
+      empty.value = "";
+      empty.textContent = "—";
+      input.appendChild(empty);
+      [{ value: "true", label: "Yes" }, { value: "false", label: "No" }].forEach(function (opt) {
+        var option = document.createElement("option");
+        option.value = opt.value;
+        option.textContent = opt.label;
+        if (currentValue === true && opt.value === "true") option.selected = true;
+        if (currentValue === false && opt.value === "false") option.selected = true;
+        input.appendChild(option);
+      });
+    } else {
+      input = document.createElement("input");
+      input.className = "form-control";
+      if (field.type === "integer" || field.type === "float") {
+        input.type = "number";
+        if (field.type === "float") input.step = "any";
+        if (field.type === "integer") input.step = "1";
+      } else {
+        input.type = "text";
+      }
+      if (currentValue != null) input.value = currentValue;
     }
 
-    ims.bootstrapPage({ activeNav: "inventory", requireWrite: true }).then(function (boot) {
-      if (!boot) return;
-      ims.getCategoryTree().then(function (tree) {
-        categoryTree = tree;
-        var sel = document.getElementById("selCat");
-        var groups = ims.collectLeafCategories(tree);
-        Object.keys(groups).forEach(function (groupName) {
-          var og = document.createElement("optgroup");
-          og.label = groupName;
-          groups[groupName].forEach(function (c) {
-            var o = document.createElement("option");
-            o.value = c.id;
-            // `collectLeafCategories()` returns leaf objects shaped like {id, label, full_name}
-            // (not full Category model objects). Render using label/path instead.
-            o.textContent = (c.label || "").split(" > ").join(" / ") || c.full_name || String(c.id);
-            og.appendChild(o);
-          });
-          sel.appendChild(og);
-        });
-        if (initialCategoryId && sel.querySelector('option[value="' + initialCategoryId + '"]')) {
-          sel.value = initialCategoryId;
-        }
-        sel.addEventListener("change", renderDynamicFields);
-        renderDynamicFields();
+    input.dataset.childField = field.name;
+    input.name = "child__" + field.name;
+    wrapper.appendChild(input);
+    return wrapper;
+  }
+
+  var categoryTree = null;
+  var categoryFlat = [];
+
+  ims.initImagePicker({
+    inputId: "itemImageInput",
+    previewId: "itemImagePreview",
+    cameraBtnId: "btnCamera",
+    clearBtnId: "btnClearImage",
+  });
+
+  function getCategoryChildType(catId) {
+    var node = ims.findCategoryById(categoryTree, catId);
+    if (!node) {
+      node = (categoryFlat || []).find(function (cat) {
+        return String(cat.id) === String(catId);
       });
+    }
+    return node ? node.child_type : null;
+  }
+
+  function renderCategoryChildFields(childType, existingValues) {
+    existingValues = existingValues || {};
+    var fields = (childType && CHILD_TYPE_SCHEMA[childType]) || [];
+    var container = document.getElementById("catChildFields");
+    container.innerHTML = "";
+    var wrap = document.getElementById("categorySpecificFields");
+    wrap.classList.toggle("d-none", !fields.length);
+    fields.forEach(function (field) {
+      container.appendChild(renderChildField(field, existingValues[field.name]));
+    });
+  }
+
+  function collectLeafNodes(nodes, acc) {
+    acc = acc || [];
+    (nodes || []).forEach(function (node) {
+      if (node.is_leaf || !(node.children && node.children.length)) {
+        acc.push(node);
+        return;
+      }
+      collectLeafNodes(node.children || [], acc);
+    });
+    return acc;
+  }
+
+  function renderCategoryOptions(tree, fallbackCategories) {
+    var sel = document.getElementById("selCat");
+    var emptyState = document.getElementById("categoryEmptyState");
+    var leafNodes = collectLeafNodes(tree || []);
+
+    if (!leafNodes.length && fallbackCategories && fallbackCategories.length) {
+      leafNodes = fallbackCategories.filter(function (cat) {
+        return cat.is_leaf !== false;
+      });
+    }
+
+    sel.innerHTML = "";
+    if (!leafNodes.length) {
+      var empty = document.createElement("option");
+      empty.value = "";
+      empty.textContent = "No categories available";
+      sel.appendChild(empty);
+      sel.disabled = true;
+      emptyState.classList.remove("d-none");
+      return;
+    }
+
+    emptyState.classList.add("d-none");
+    sel.disabled = false;
+    leafNodes.sort(function (a, b) {
+      return String(a.name || "").localeCompare(String(b.name || ""));
+    }).forEach(function (cat) {
+      var o = document.createElement("option");
+      o.value = cat.id;
+      o.textContent = String(cat.name || cat.id);
+      sel.appendChild(o);
     });
 
-    document.getElementById("formItem").addEventListener("submit", function (e) {
-      e.preventDefault();
-      var fd = new FormData(e.target);
-      var addAnother = document.getElementById("chkAddAnother") && document.getElementById("chkAddAnother").checked;
-      var chosenCategoryId = fd.get("category");
-      var payload = {
-        category: parseInt(fd.get("category"), 10),
-        specs: (fd.get("specs") || "").trim(),
-        capacity: (fd.get("capacity") || "").trim(),
-        custom_values: ims.collectCustomFieldValues(e.target, currentSchema),
-        quantity: parseInt(fd.get("quantity") || "0", 10),
-        status: fd.get("status"),
-        remark: fd.get("remark") || "",
-        log_note: fd.get("log_note") || "",
-      };
-      ims.api.post("/items/", payload).then(function (res) {
-        ims.showToast("Item created", "success");
-        if (addAnother && chosenCategoryId) {
-          window.location.href = "/add/?category=" + encodeURIComponent(chosenCategoryId);
-        } else {
-          // After creating an item, go back to inventory (optionally filtered by category).
-          var redirectUrl = "/inventory/";
-          if (chosenCategoryId) {
-            redirectUrl += "?category=" + encodeURIComponent(chosenCategoryId);
-          }
-          window.location.href = redirectUrl;
-        }
-      }).catch(function (ex) {
-        var msg = (ex.response && ex.response.data && JSON.stringify(ex.response.data)) || "Save failed";
-        ims.showToast(msg, "danger");
-      });
+    if (initialCategoryId && sel.querySelector('option[value="' + initialCategoryId + '"]')) {
+      sel.value = initialCategoryId;
+    }
+  }
+
+  function collectChildData() {
+    var data = {};
+    var catId = parseInt(document.getElementById("selCat").value, 10);
+    if (!catId) return data;
+    var childType = getCategoryChildType(catId);
+    if (!childType) return data;
+    var fields = CHILD_TYPE_SCHEMA[childType] || [];
+    fields.forEach(function (field) {
+      var el = document.querySelector('[data-child-field="' + field.name + '"]');
+      if (!el) return;
+      var raw = el.value;
+      if (raw === "" || raw === undefined || raw === null) return;
+      if (field.type === "integer") { data[field.name] = parseInt(raw, 10); }
+      else if (field.type === "float") { data[field.name] = parseFloat(raw); }
+      else if (field.type === "boolean") { data[field.name] = raw === "true"; }
+      else { data[field.name] = raw; }
     });
-  })();
+    return data;
+  }
+
+  ims.bootstrapPage({ activeNav: "inventory", requireWrite: true }).then(function (boot) {
+    if (!boot) return;
+    Promise.all([
+      ims.getCategoryTree(true),
+      ims.getChildTypeSchemas(true).catch(function () { return CHILD_TYPE_SCHEMA; }),
+    ]).then(function (res) {
+      categoryTree = res[0] || [];
+      categoryFlat = ims.flattenCategoryTree(categoryTree || []);
+      CHILD_TYPE_SCHEMA = res[1] || CHILD_TYPE_SCHEMA;
+      var sel = document.getElementById("selCat");
+      renderCategoryOptions(categoryTree, categoryFlat);
+      sel.addEventListener("change", function () {
+        renderCategoryChildFields(getCategoryChildType(parseInt(sel.value, 10)));
+      });
+      renderCategoryChildFields(getCategoryChildType(parseInt(sel.value, 10)));
+    }).catch(function () {
+      document.getElementById("selCat").innerHTML = '<option value="">Could not load categories</option>';
+      document.getElementById("categoryEmptyState").classList.remove("d-none");
+      ims.showToast("Could not load categories", "danger");
+    });
+  });
+
+  document.getElementById("formItem").addEventListener("submit", function (e) {
+    e.preventDefault();
+    var fd = new FormData(e.target);
+    var addAnother = document.getElementById("chkAddAnother") && document.getElementById("chkAddAnother").checked;
+    var chosenCategoryId = fd.get("category");
+    var capacityValue = fd.get("capacity_value");
+    var payload = {
+      category: parseInt(fd.get("category"), 10),
+      name: (fd.get("name") || "").trim(),
+      specs: (fd.get("specs") || "").trim(),
+      brand: (fd.get("brand") || "").trim() || null,
+      capacity_value: capacityValue ? parseFloat(capacityValue) : null,
+      capacity_unit: (fd.get("capacity_unit") || "").trim() || null,
+      child_data: collectChildData(),
+      quantity: parseInt(fd.get("quantity") || "0", 10),
+      status: fd.get("status"),
+      remark: fd.get("remark") || "",
+      log_note: fd.get("log_note") || "",
+    };
+    var body = new FormData();
+    Object.keys(payload).forEach(function (key) {
+      var value = key === "child_data" ? JSON.stringify(payload[key]) : payload[key];
+      body.append(key, value === null || value === undefined ? "" : value);
+    });
+    var imageFile = document.getElementById("itemImageInput").files[0];
+    if (imageFile) body.append("image", imageFile);
+    ims.api.post("/items/", body).then(function () {
+      ims.showToast("Item created", "success");
+      if (addAnother && chosenCategoryId) {
+        window.location.href = "/add/?category=" + encodeURIComponent(chosenCategoryId);
+      } else {
+        var redirectUrl = "/inventory/";
+        if (chosenCategoryId) redirectUrl += "?category=" + encodeURIComponent(chosenCategoryId);
+        window.location.href = redirectUrl;
+      }
+    }).catch(function (ex) {
+      var msg = (ex.response && ex.response.data && JSON.stringify(ex.response.data)) || "Save failed";
+      ims.showToast(msg, "danger");
+    });
+  });
+})();
 </script>
 {% endblock %}

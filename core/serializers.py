@@ -1,10 +1,32 @@
+import json
+
 from django.contrib.auth import get_user_model
-from django.core.exceptions import ValidationError as DjangoValidationError
+from django.core.exceptions import ObjectDoesNotExist
 from django.db import transaction
 from rest_framework import serializers
 from simple_history.utils import update_change_reason
 
-from .models import Category, InventoryItem, InventoryLog, validate_custom_field_schema, validate_custom_values
+from .models import (
+    CHILD_MODEL_REVERSE_NAMES,
+    CPUItem,
+    CableItem,
+    Category,
+    InventoryItem,
+    InventoryLog,
+    MiscItem,
+    RAMItem,
+    SFPItem,
+    StorageItem,
+    SwitchItem,
+)
+
+STORAGE_FIELDS = {"drive_type", "brand", "interface", "form_factor", "rpm"}
+SFP_FIELDS = {"sfp_type", "wavelength_nm", "max_distance_m", "connector_type"}
+SWITCH_FIELDS = {"brand", "ports_1g", "ports_10g", "ports_25g", "ports_40g", "ports_100g", "ports_other"}
+CABLE_FIELDS = {"cable_type", "length_m", "connector_a", "connector_b"}
+RAM_FIELDS = {"memory_type", "form_factor", "speed_mhz", "ecc"}
+CPU_FIELDS = {"architecture", "core_count", "thread_count", "base_clock_ghz", "socket", "tdp_w"}
+MISC_FIELDS = {"item_type"}
 
 User = get_user_model()
 
@@ -15,6 +37,71 @@ def get_user_role(user):
     if user.is_staff:
         return "staff"
     return "regular"
+
+
+def sync_child_model(item, child_data):
+    child_type = item.category.child_type
+    if not isinstance(child_data, dict):
+        child_data = {}
+    active = set()
+
+    if child_type == "storage":
+        defaults = {k: v for k, v in child_data.items() if k in STORAGE_FIELDS}
+        StorageItem.objects.update_or_create(
+            inventory_item=item,
+            defaults=defaults,
+        )
+        active.add("storage")
+    elif child_type == "sfp":
+        defaults = {k: v for k, v in child_data.items() if k in SFP_FIELDS}
+        SFPItem.objects.update_or_create(
+            inventory_item=item,
+            defaults=defaults,
+        )
+        active.add("sfp")
+    elif child_type == "switch":
+        defaults = {k: v for k, v in child_data.items() if k in SWITCH_FIELDS}
+        SwitchItem.objects.update_or_create(
+            inventory_item=item,
+            defaults=defaults,
+        )
+        active.add("switch")
+    elif child_type == "ram":
+        defaults = {k: v for k, v in child_data.items() if k in RAM_FIELDS}
+        RAMItem.objects.update_or_create(
+            inventory_item=item,
+            defaults=defaults,
+        )
+        active.add("ram")
+    elif child_type == "cpu":
+        defaults = {k: v for k, v in child_data.items() if k in CPU_FIELDS}
+        CPUItem.objects.update_or_create(
+            inventory_item=item,
+            defaults=defaults,
+        )
+        active.add("cpu")
+    elif child_type == "misc":
+        defaults = {k: v for k, v in child_data.items() if k in MISC_FIELDS}
+        MiscItem.objects.update_or_create(
+            inventory_item=item,
+            defaults=defaults,
+        )
+        active.add("misc")
+    elif child_type == "cable":
+        defaults = {k: v for k, v in child_data.items() if k in CABLE_FIELDS}
+        CableItem.objects.update_or_create(
+            inventory_item=item,
+            defaults=defaults,
+        )
+        active.add("cable")
+
+    for attr in CHILD_MODEL_REVERSE_NAMES:
+        if attr not in active:
+            try:
+                child = getattr(item, attr)
+                child.delete()
+            except (AttributeError, ObjectDoesNotExist):
+                pass
 
 
 class UserBriefSerializer(serializers.ModelSerializer):
@@ -39,17 +126,9 @@ class CurrentUserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
         fields = (
-            "id",
-            "username",
-            "email",
-            "first_name",
-            "last_name",
-            "full_name",
-            "is_active",
-            "is_staff",
-            "is_superuser",
-            "role",
-            "last_login",
+            "id", "username", "email", "first_name", "last_name",
+            "full_name", "is_active", "is_staff", "is_superuser",
+            "role", "last_login",
         )
 
     def get_full_name(self, obj):
@@ -71,20 +150,9 @@ class AdminUserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
         fields = (
-            "id",
-            "username",
-            "email",
-            "first_name",
-            "last_name",
-            "full_name",
-            "role",
-            "role_input",
-            "is_active",
-            "is_staff",
-            "is_superuser",
-            "last_login",
-            "password",
-            "confirm_password",
+            "id", "username", "email", "first_name", "last_name",
+            "full_name", "role", "role_input", "is_active", "is_staff",
+            "is_superuser", "last_login", "password", "confirm_password",
         )
         read_only_fields = ("last_login", "is_staff", "is_superuser", "full_name", "role")
 
@@ -149,7 +217,7 @@ class CategorySerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Category
-        fields = ("id", "name", "parent", "parent_name", "description", "custom_fields", "full_name", "depth", "is_leaf")
+        fields = ("id", "name", "parent", "parent_name", "description", "child_type", "full_name", "depth", "is_leaf")
         validators = []
 
     def validate_parent(self, value):
@@ -172,7 +240,6 @@ class CategorySerializer(serializers.ModelSerializer):
         attrs = super().validate(attrs)
         instance = getattr(self, "instance", None)
         parent = attrs.get("parent", getattr(instance, "parent", None))
-        custom_fields = attrs.get("custom_fields", getattr(instance, "custom_fields", []))
 
         depth = 1
         node = parent
@@ -196,16 +263,10 @@ class CategorySerializer(serializers.ModelSerializer):
             sibling_qs = sibling_qs.exclude(pk=instance.pk)
         if sibling_qs.exists():
             raise serializers.ValidationError({"name": "A category with this name already exists at this level."})
-        if instance is not None and instance.items.exists():
-            parent_id = parent.pk if parent is not None else instance.pk
-            if Category.objects.filter(parent_id=parent_id).exclude(pk=instance.pk).exists():
-                raise serializers.ValidationError(
-                    "A category with assigned items cannot become or remain a parent category."
-                )
-        try:
-            attrs["custom_fields"] = validate_custom_field_schema(custom_fields)
-        except DjangoValidationError as exc:
-            raise serializers.ValidationError(exc.message_dict if hasattr(exc, "message_dict") else exc.messages)
+        if instance is not None and instance.items.exists() and instance.children.exists():
+            raise serializers.ValidationError(
+                "A category with assigned items cannot become or remain a parent category."
+            )
         return attrs
 
 
@@ -220,16 +281,8 @@ class CategoryTreeSerializer(serializers.ModelSerializer):
     class Meta:
         model = Category
         fields = (
-            "id",
-            "name",
-            "parent",
-            "description",
-            "custom_fields",
-            "full_name",
-            "depth",
-            "is_leaf",
-            "item_count",
-            "children",
+            "id", "name", "parent", "description", "child_type",
+            "full_name", "depth", "is_leaf", "item_count", "children",
         )
 
     def get_item_count(self, obj):
@@ -239,55 +292,145 @@ class CategoryTreeSerializer(serializers.ModelSerializer):
         return CategoryTreeSerializer(obj.children.all(), many=True).data
 
 
+class SFPItemSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = SFPItem
+        fields = ("sfp_type", "wavelength_nm", "max_distance_m", "connector_type")
+
+
+class StorageItemSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = StorageItem
+        fields = ("drive_type", "brand", "interface", "form_factor", "rpm")
+
+
+class SwitchItemSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = SwitchItem
+        fields = ("brand", "ports_1g", "ports_10g", "ports_25g", "ports_40g", "ports_100g", "ports_other")
+
+
+class CableItemSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CableItem
+        fields = ("cable_type", "length_m", "connector_a", "connector_b")
+
+
+class RAMItemSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = RAMItem
+        fields = ("memory_type", "form_factor", "speed_mhz", "ecc")
+
+
+class CPUItemSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CPUItem
+        fields = ("architecture", "core_count", "thread_count", "base_clock_ghz", "socket", "tdp_w")
+
+
+class MiscItemSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = MiscItem
+        fields = ("item_type",)
+
+
+CHILD_SERIALIZER_MAP = {
+    "sfp": SFPItemSerializer,
+    "storage": StorageItemSerializer,
+    "switch": SwitchItemSerializer,
+    "cable": CableItemSerializer,
+    "ram": RAMItemSerializer,
+    "cpu": CPUItemSerializer,
+    "misc": MiscItemSerializer,
+}
+
+
+def get_child_type_schemas():
+    schemas = {}
+    for child_type, serializer_class in CHILD_SERIALIZER_MAP.items():
+        model = serializer_class.Meta.model
+        fields = []
+        for field_name in serializer_class.Meta.fields:
+            model_field = model._meta.get_field(field_name)
+            field_type = "string"
+            if model_field.get_internal_type() in {"PositiveIntegerField", "IntegerField"}:
+                field_type = "integer"
+            elif model_field.get_internal_type() in {"FloatField", "DecimalField"}:
+                field_type = "float"
+            elif model_field.get_internal_type() == "BooleanField":
+                field_type = "boolean"
+            choices = [choice[0] for choice in getattr(model_field, "choices", [])]
+            fields.append(
+                {
+                    "name": field_name,
+                    "label": model_field.verbose_name.title(),
+                    "type": "choice" if choices else field_type,
+                    "choices": choices,
+                    "required": not model_field.blank and not model_field.null,
+                }
+            )
+        schemas[child_type] = fields
+    return schemas
+
+
 class InventoryItemSerializer(serializers.ModelSerializer):
     category = CategorySerializer(read_only=True)
     display_name = serializers.ReadOnlyField()
+    capacity_display = serializers.SerializerMethodField()
+    child = serializers.SerializerMethodField()
 
     class Meta:
         model = InventoryItem
         fields = (
-            "id",
-            "category",
-            "display_name",
-            "specs",
-            "capacity",
-            "custom_values",
-            "quantity",
-            "status",
-            "remark",
-            "last_updated",
-            "created_at",
+            "id", "category", "display_name", "name", "specs", "brand",
+            "capacity_value", "capacity_unit", "capacity_display",
+            "quantity", "status", "remark", "activity_note",
+            "image", "child", "last_updated", "created_at",
         )
+
+    def get_capacity_display(self, obj):
+        if obj.capacity_value is not None:
+            unit = f" {obj.capacity_unit}" if obj.capacity_unit else ""
+            return f"{obj.capacity_value}{unit}"
+        return ""
+
+    def get_child(self, obj):
+        child = obj.get_child()
+        if child is None:
+            return None
+        for attr, ser_cls in CHILD_SERIALIZER_MAP.items():
+            if hasattr(obj, attr):
+                try:
+                    related = getattr(obj, attr)
+                    if related.pk:
+                        return ser_cls(related).data
+                except ObjectDoesNotExist:
+                    continue
+        return None
 
 
 class InventoryItemWriteSerializer(serializers.ModelSerializer):
     log_note = serializers.CharField(write_only=True, required=False, allow_blank=True)
     specs = serializers.CharField(required=True, allow_blank=False)
-    capacity = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    child_data = serializers.JSONField(write_only=True, required=False, default=dict)
+    image_clear = serializers.BooleanField(write_only=True, required=False, default=False)
 
     class Meta:
         model = InventoryItem
         fields = (
-            "category",
-            "specs",
-            "capacity",
-            "custom_values",
-            "quantity",
-            "status",
-            "remark",
-            "log_note",
+            "id", "category", "name", "specs", "brand",
+            "capacity_value", "capacity_unit",
+            "quantity", "status", "remark", "activity_note",
+            "image", "image_clear", "log_note", "child_data",
         )
+        read_only_fields = ("id",)
 
     def validate(self, attrs):
         instance = getattr(self, "instance", None)
         if instance is None:
-            status_val = attrs.get("status", InventoryItem.Status.IN_STOCK)
             category = attrs.get("category")
         else:
-            status_val = attrs.get("status", instance.status)
             category = attrs.get("category", instance.category)
-        custom_values = attrs.get("custom_values", instance.custom_values if instance is not None else {})
-        attrs["capacity"] = (attrs.get("capacity") or "").strip()
         attrs["specs"] = (attrs.get("specs") if "specs" in attrs else (instance.specs if instance is not None else "")).strip()
         if not attrs["specs"]:
             raise serializers.ValidationError({"specs": "This field is required."})
@@ -295,18 +438,43 @@ class InventoryItemWriteSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 {"category": "Inventory items can only be assigned to leaf categories."}
             )
-        try:
-            attrs["custom_values"] = validate_custom_values(category, custom_values)
-        except DjangoValidationError as exc:
-            raise serializers.ValidationError(exc.message_dict if hasattr(exc, "message_dict") else exc.messages)
+        child_data = attrs.get("child_data")
+        if isinstance(child_data, str):
+            try:
+                child_data = json.loads(child_data) if child_data else {}
+            except json.JSONDecodeError:
+                raise serializers.ValidationError({"child_data": "Expected valid JSON for category-specific fields."})
+            attrs["child_data"] = child_data
+        if child_data is not None:
+            if not isinstance(child_data, dict):
+                raise serializers.ValidationError({"child_data": "Expected an object of category-specific fields."})
+            child_type = category.child_type if category is not None else ""
+            serializer_class = CHILD_SERIALIZER_MAP.get(child_type)
+            if child_data and not serializer_class:
+                raise serializers.ValidationError(
+                    {"child_data": "This category does not accept category-specific fields."}
+                )
+            if serializer_class:
+                allowed_fields = set(serializer_class.Meta.fields)
+                unknown_fields = sorted(set(child_data) - allowed_fields)
+                if unknown_fields:
+                    raise serializers.ValidationError(
+                        {"child_data": f"Unknown field(s) for this category: {', '.join(unknown_fields)}."}
+                    )
+                child_serializer = serializer_class(data=child_data, partial=True)
+                child_serializer.is_valid(raise_exception=True)
+                attrs["child_data"] = child_serializer.validated_data
         return attrs
 
     def create(self, validated_data):
         user = self.context["request"].user
         log_note = (validated_data.pop("log_note", "") or "").strip()
+        child_data = validated_data.pop("child_data", {})
+        validated_data.pop("image_clear", None)
         if validated_data.get("quantity", 0) == 0:
             validated_data["status"] = InventoryItem.Status.OUT_OF_STOCK
         item = InventoryItem.objects.create(**validated_data)
+        sync_child_model(item, child_data)
         change_reason = log_note or "Added item"
         update_change_reason(item, change_reason)
         InventoryLog.objects.create(
@@ -323,17 +491,22 @@ class InventoryItemWriteSerializer(serializers.ModelSerializer):
     def update(self, instance, validated_data):
         user = self.context["request"].user
         log_note = (validated_data.pop("log_note", "") or "").strip()
+        child_data = validated_data.pop("child_data", {})
+        image_clear = validated_data.pop("image_clear", False)
         old_qty = instance.quantity
         old_status = instance.status
         old_remark = instance.remark or ""
 
         for attr, val in validated_data.items():
             setattr(instance, attr, val)
+        if image_clear:
+            instance.image = None
 
         if instance.quantity == 0:
             instance.status = InventoryItem.Status.OUT_OF_STOCK
 
         instance.save()
+        sync_child_model(instance, child_data)
 
         new_qty = instance.quantity
         new_status = instance.status
@@ -380,6 +553,23 @@ class InventoryItemWriteSerializer(serializers.ModelSerializer):
                     quantity_after=new_qty,
                     deployed_to="",
                     notes=log_note or "Marked item as faulty",
+                    performed_by=user,
+                )
+            )
+
+        if new_status != old_status and new_status not in (
+            InventoryItem.Status.DEPLOYED,
+            InventoryItem.Status.FAULTY,
+        ) and old_status != InventoryItem.Status.DEPLOYED:
+            change_fragments.append("Status changed")
+            logs.append(
+                InventoryLog(
+                    item=instance,
+                    action=InventoryLog.Action.STATUS_CHANGED,
+                    quantity_before=old_qty,
+                    quantity_after=new_qty,
+                    deployed_to="",
+                    notes=log_note or "Status updated",
                     performed_by=user,
                 )
             )
@@ -437,15 +627,8 @@ class InventoryLogSerializer(serializers.ModelSerializer):
     class Meta:
         model = InventoryLog
         fields = (
-            "id",
-            "item",
-            "action",
-            "quantity_before",
-            "quantity_after",
-            "deployed_to",
-            "notes",
-            "performed_by",
-            "timestamp",
+            "id", "item", "action", "quantity_before", "quantity_after",
+            "deployed_to", "notes", "performed_by", "timestamp",
         )
 
 
@@ -453,12 +636,8 @@ class InventoryLogWriteSerializer(serializers.ModelSerializer):
     class Meta:
         model = InventoryLog
         fields = (
-            "item",
-            "action",
-            "quantity_before",
-            "quantity_after",
-            "deployed_to",
-            "notes",
+            "item", "action", "quantity_before", "quantity_after",
+            "deployed_to", "notes",
         )
 
     def create(self, validated_data):
@@ -488,7 +667,7 @@ class InventoryAdjustSerializer(serializers.Serializer):
 
     def validate(self, attrs):
         attrs = super().validate(attrs)
-        item: InventoryItem = self.context["item"]
+        item = self.context["item"]
         action = attrs["action"]
         qty = attrs["quantity"]
 
@@ -507,8 +686,7 @@ class InventoryAdjustSerializer(serializers.Serializer):
     @transaction.atomic
     def save(self, **kwargs):
         request = self.context["request"]
-        item: InventoryItem = self.context["item"]
-        # Lock row to avoid concurrent stock edits.
+        item = self.context["item"]
         item = InventoryItem.objects.select_for_update().select_related("category").get(pk=item.pk)
 
         action = self.validated_data["action"]
@@ -538,7 +716,7 @@ class InventoryAdjustSerializer(serializers.Serializer):
             item.status = InventoryItem.Status.IN_STOCK
             log_action = InventoryLog.Action.RETURNED
             reason = notes or f"Returned (+{qty}) from {deployed_to}"
-        else:  # MARK_FAULTY
+        else:
             item.status = InventoryItem.Status.FAULTY
             log_action = InventoryLog.Action.FAULTY
             reason = notes or "Marked as faulty"
@@ -559,7 +737,6 @@ class InventoryAdjustSerializer(serializers.Serializer):
             performed_by=request.user,
         )
 
-        # For "stock out" we keep status unless quantity hits 0; for deploy we force DEPLOYED.
         if action == self.STOCK_OUT and old_status != item.status and not notes:
             update_change_reason(item, f"Stock out (-{qty})")
 
@@ -575,7 +752,10 @@ class HistorySerializer(serializers.ModelSerializer):
 class DashboardSerializer(serializers.Serializer):
     count_by_category = serializers.DictField(child=serializers.IntegerField())
     count_by_parent_category = serializers.DictField(child=serializers.IntegerField())
+    category_totals = serializers.ListField()
     count_by_status = serializers.DictField(child=serializers.IntegerField())
+    recent_updated_count = serializers.IntegerField()
+    low_stock_count = serializers.IntegerField()
     total_items = serializers.IntegerField()
     recent_logs = InventoryLogSerializer(many=True)
     low_stock_items = InventoryItemSerializer(many=True)

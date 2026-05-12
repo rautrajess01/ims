@@ -5,7 +5,7 @@
   <div class="page-actions page-header">
     <div>
       <h1 class="h3 mb-1">Inventory</h1>
-      <p class="text-secondary mb-0">Browse grouped stock by category path and filter by search text.</p>
+      <p class="text-secondary mb-0">Browse stock with quick, focused filters.</p>
     </div>
     <div class="page-actions-group">
       <a class="btn btn-primary" href="/add/" data-requires-write id="btnAddItem">Add item</a>
@@ -13,7 +13,7 @@
   </div>
   <div class="content-panel p-3 p-lg-4">
     <div class="row g-3 align-items-center mb-3">
-      <div class="col-lg-5">
+      <div class="col-lg-4">
         <input
           type="search"
           class="form-control"
@@ -21,13 +21,22 @@
           placeholder="Search category, fields and remark…"
         />
       </div>
-      <div class="col-lg-7 text-lg-end">
-        <select class="form-select form-select-sm d-inline-block me-2 mb-2" style="width: 240px" id="categoryFilterSelect">
-          <option value="all">All categories</option>
-        </select>
-        <button class="btn btn-outline-secondary btn-sm" id="filterAll" type="button">
-          Show all categories
-        </button>
+      <div class="col-lg-8">
+        <div class="inventory-filter-toolbar">
+          <select class="form-select form-select-sm" id="categoryFilterSelect">
+            <option value="all">All categories</option>
+          </select>
+          <select class="form-select form-select-sm" id="statusFilter">
+            <option value="">Any status</option>
+            <option value="in_stock">In stock</option>
+            <option value="deployed">Deployed</option>
+            <option value="out_of_stock">Out of stock</option>
+            <option value="na">N/A</option>
+            <option value="faulty">Faulty</option>
+          </select>
+          <button class="btn btn-outline-secondary btn-sm" id="filterAll" type="button">All categories</button>
+          <button class="btn btn-outline-secondary btn-sm" id="clearFilters" type="button">Clear</button>
+        </div>
       </div>
     </div>
     <div class="table-responsive" style="max-height: 70vh">
@@ -55,6 +64,32 @@
     var sidebarApi = null;
     var searchTimer = null;
     var currentUser = null;
+    var lowStockOnly = ["1", "true", "yes"].indexOf((params.get("low_stock") || "").toLowerCase()) >= 0;
+    var FILTERS = [
+      ["status", "statusFilter"],
+    ];
+
+    function toDateLocalParam(value) {
+      if (!value) return "";
+      var date = new Date(value);
+      return Number.isNaN(date.getTime()) ? "" : date.toISOString();
+    }
+
+    function itemText(value) {
+      return String(value === undefined || value === null ? "" : value).toLowerCase();
+    }
+
+    function getFilterValues() {
+      var values = {};
+      FILTERS.forEach(function (entry) {
+        var key = entry[0];
+        var el = document.getElementById(entry[1]);
+        if (!el) return;
+        values[key] = (el.value || "").trim();
+      });
+      values.low_stock = lowStockOnly;
+      return values;
+    }
 
     function syncUrl() {
       var next = new URL(window.location.href);
@@ -63,6 +98,16 @@
       var q = (document.getElementById("searchQ").value || "").trim();
       if (!q) next.searchParams.delete("q");
       else next.searchParams.set("q", q);
+      var filters = getFilterValues();
+      FILTERS.forEach(function (entry) {
+        var key = entry[0];
+        var value = filters[key];
+        if (key === "updated_after" || key === "updated_before" || key === "created_after" || key === "created_before") value = toDateLocalParam(value);
+        if (!value) next.searchParams.delete(key);
+        else next.searchParams.set(key, value);
+      });
+      if (filters.low_stock) next.searchParams.set("low_stock", "1");
+      else next.searchParams.delete("low_stock");
       window.history.replaceState({}, "", next.pathname + next.search);
     }
 
@@ -84,35 +129,35 @@
     }
 
     function buildSearchBlob(item) {
-      var customText = Object.keys(item.custom_values || {}).map(function (key) {
-        return String(item.custom_values[key]);
+      var child = item.child || {};
+      var childText = Object.keys(child).map(function (key) {
+        return String(child[key]);
       }).join(" ");
       return (
         ((item.category && (item.category.full_name || item.category.name)) || "") +
+        " " + (item.name || "") +
         " " + (item.specs || "") +
-        " " + (item.capacity || "") +
+        " " + (item.brand || "") +
+        " " + (item.capacity_display || "") +
         " " + (item.display_name || "") +
         " " + (item.remark || "") +
-        " " + customText
+        " " + childText
       ).toLowerCase();
     }
 
     function renderCategoryFilterOptions() {
       var select = document.getElementById("categoryFilterSelect");
-      var groups = ims.collectLeafCategories(categoryTree);
       select.innerHTML = '<option value="all">All categories</option>';
-      Object.keys(groups).forEach(function (groupName) {
-        var optgroup = document.createElement("optgroup");
-        optgroup.label = groupName;
-        groups[groupName].forEach(function (category) {
-          var option = document.createElement("option");
-          option.value = category.id;
-          // `collectLeafCategories()` returns leaf objects shaped like {id, label, full_name}
-          // (not full Category model objects). Render using label/path instead.
-          option.textContent = (category.label || "").split(" > ").join(" / ") || category.full_name || String(category.id);
-          optgroup.appendChild(option);
-        });
-        select.appendChild(optgroup);
+      var flatLeaf = ims.flattenCategoryTree(categoryTree || []).filter(function (node) {
+        return node.is_leaf !== false;
+      });
+      flatLeaf.sort(function (a, b) {
+        return String(a.name || "").localeCompare(String(b.name || ""));
+      }).forEach(function (category) {
+        var option = document.createElement("option");
+        option.value = category.id;
+        option.textContent = String(category.name || category.id);
+        select.appendChild(option);
       });
       if (select.querySelector('option[value="' + activeCatId + '"]')) select.value = activeCatId;
     }
@@ -120,9 +165,10 @@
     function renderTableHead() {
       var head = document.getElementById("tableHeadRow");
       head.innerHTML = "";
-      var labels = ["Category", "Specs", "Capacity", "Quantity", "Remark", "Status", "Actions"];
+      var labels = ["Item", "Quantity", "Remark", "Status", "Actions"];
       labels.forEach(function (label) {
         var th = document.createElement("th");
+        th.className = label === "Item" ? "text-start" : "text-center";
         th.textContent = label;
         head.appendChild(th);
       });
@@ -130,12 +176,29 @@
 
     function buildFlatRows() {
       var q = (document.getElementById("searchQ").value || "").toLowerCase();
+      var filters = getFilterValues();
       return (allItems || []).filter(function (it) {
         if (
           activeCatId !== "all" &&
           (descendantsById[String(activeCatId)] || []).indexOf(String(it.category.id)) < 0
         ) return false;
         if (q && buildSearchBlob(it).indexOf(q) < 0) return false;
+        if (filters.status && it.status !== filters.status) return false;
+        if (filters.name && itemText(it.name || it.display_name).indexOf(filters.name.toLowerCase()) < 0) return false;
+        if (filters.specs && itemText(it.specs).indexOf(filters.specs.toLowerCase()) < 0) return false;
+        if (filters.brand && itemText(it.brand).indexOf(filters.brand.toLowerCase()) < 0) return false;
+        if (filters.capacity_unit && itemText(it.capacity_unit).indexOf(filters.capacity_unit.toLowerCase()) < 0) return false;
+        if (filters.remark && itemText(it.remark).indexOf(filters.remark.toLowerCase()) < 0) return false;
+        if (filters.activity_note && itemText(it.activity_note).indexOf(filters.activity_note.toLowerCase()) < 0) return false;
+        if (filters.quantity_min && Number(it.quantity) < Number(filters.quantity_min)) return false;
+        if (filters.quantity_max && Number(it.quantity) > Number(filters.quantity_max)) return false;
+        if (filters.capacity_min && Number(it.capacity_value || 0) < Number(filters.capacity_min)) return false;
+        if (filters.capacity_max && Number(it.capacity_value || 0) > Number(filters.capacity_max)) return false;
+        if (filters.low_stock && Number(it.quantity) > 2) return false;
+        if (filters.updated_after && (!it.last_updated || new Date(it.last_updated) < new Date(filters.updated_after))) return false;
+        if (filters.updated_before && (!it.last_updated || new Date(it.last_updated) > new Date(filters.updated_before))) return false;
+        if (filters.created_after && (!it.created_at || new Date(it.created_at) < new Date(filters.created_after))) return false;
+        if (filters.created_before && (!it.created_at || new Date(it.created_at) > new Date(filters.created_before))) return false;
         return true;
       }).sort(function (a, b) {
         var aKey = ims.formatCategoryLeaf(a.category) + " / " + String(a.specs || a.display_name || "");
@@ -148,28 +211,25 @@
       var tb = document.getElementById("tblBody");
       tb.innerHTML = "";
       var rows = buildFlatRows();
-      var colCount = 7;
+      var colCount = 5;
       renderTableHead();
 
       rows.forEach(function (it) {
         var tr = document.createElement("tr");
-        var canWrite = currentUser && ims.canManageInventory(currentUser);
-        var actions = '<a class="btn btn-sm btn-outline-secondary" href="/item/?id=' + encodeURIComponent(it.id) + '">View</a>';
-        if (canWrite) {
-          actions =
-            '<a class="btn btn-sm btn-outline-secondary" href="/item/?id=' + encodeURIComponent(it.id) + '">View</a>' +
-            '<a class="btn btn-sm btn-primary" href="/edit/?id=' + encodeURIComponent(it.id) + '" data-requires-write>Edit</a>' +
-            '<button type="button" class="btn btn-sm btn-outline-danger" data-requires-write data-remove-item="1" data-item-id="' + ims.escapeHtml(it.id) + '">Remove</button>';
-        }
-        var specsText = String(it.specs || it.display_name || ("Item #" + it.id)).trim();
+        var backParam = encodeURIComponent(window.location.pathname + window.location.search);
+        var actions = '<a class="btn btn-sm btn-outline-secondary" href="/item/?id=' + encodeURIComponent(it.id) + "&back=" + backParam + '">View</a>';
+        var specsText = String(it.specs || it.name || it.brand || ims.formatCategoryLeaf(it.category) || "Inventory item").trim();
+        var categoryBadge = '<span class="item-meta-badge">' + ims.escapeHtml(ims.formatCategoryLeaf(it.category) || "—") + "</span>";
+        var capacityBadge = '<span class="item-meta-badge">' + ims.escapeHtml((it.capacity_display || "").trim() || "—") + "</span>";
         tr.innerHTML = [
-          "<td><small>" + ims.escapeHtml(ims.formatCategoryLeaf(it.category) || "—") + "</small></td>",
-          "<td><a class=\"fw-semibold\" href=\"/item/?id=" + encodeURIComponent(it.id) + "\">" + ims.escapeHtml(specsText) + "</a></td>",
-          "<td><small class=\"text-secondary\">" + ims.escapeHtml((it.capacity || "").trim() || "—") + "</small></td>",
-          "<td>" + ims.escapeHtml(it.quantity) + "</td>",
-          "<td><small class=\"text-secondary\">" + ims.escapeHtml(it.remark || "—") + "</small></td>",
-          "<td>" + ims.statusBadge(it.status) + "</td>",
-          "<td class=\"text-end\"><div class=\"d-flex flex-wrap gap-2 justify-content-end\">" + actions + "</div></td>",
+          "<td class=\"item-list-cell\"><div class=\"d-flex align-items-center gap-3\">" +
+            ims.renderItemImage(it) +
+            "<div><a class=\"fw-semibold item-title-link\" href=\"/item/?id=" + encodeURIComponent(it.id) + "&back=" + backParam + "\">" + ims.escapeHtml(specsText) + "</a>" +
+            '<div class="item-meta-badges">' + categoryBadge + capacityBadge + "</div></div></div></td>",
+          "<td class=\"text-center\">" + ims.escapeHtml(it.quantity) + "</td>",
+          "<td class=\"text-center\"><small class=\"text-secondary\">" + ims.escapeHtml(it.remark || "—") + "</small></td>",
+          "<td class=\"text-center\">" + ims.statusBadge(it.status) + "</td>",
+          "<td class=\"text-center\"><div class=\"d-flex flex-wrap gap-2 justify-content-center\">" + actions + "</div></td>",
         ].join("");
         tb.appendChild(tr);
       });
@@ -201,6 +261,16 @@
         }).then(function (sidebar) {
           sidebarApi = sidebar;
           document.getElementById("searchQ").value = params.get("q") || "";
+          FILTERS.forEach(function (entry) {
+            var key = entry[0];
+            var el = document.getElementById(entry[1]);
+            var value = params.get(key) || "";
+            if ((key === "updated_after" || key === "updated_before" || key === "created_after" || key === "created_before") && value) {
+              var date = new Date(value);
+              if (!Number.isNaN(date.getTime())) value = date.toISOString().slice(0, 16);
+            }
+            if (el) el.value = value;
+          });
           setActiveCategory(activeCatId);
           renderRows();
         });
@@ -209,34 +279,17 @@
       ims.showToast("Failed to load inventory", "danger");
     });
 
-    document.addEventListener("click", function (e) {
-      var btn = e.target && e.target.closest ? e.target.closest("[data-remove-item]") : null;
-      if (!btn) return;
-      if (!currentUser || !ims.canManageInventory(currentUser)) return;
-      e.preventDefault();
-      e.stopPropagation();
-      var itemId = btn.getAttribute("data-item-id");
-      if (!itemId) return;
-      if (!window.confirm("Remove this item?")) return;
-      ims.api
-        .delete("/items/" + itemId + "/")
-        .then(function () {
-          ims.showToast("Item removed", "success");
-          allItems = (allItems || []).filter(function (x) {
-            return String(x.id) !== String(itemId);
-          });
-          if (sidebarApi && typeof sidebarApi.setCategoryCounts === "function") {
-            sidebarApi.setCategoryCounts(ims.countItemsByCategory(allItems));
-          }
-          renderRows();
-        })
-        .catch(function (ex) {
-          var msg = (ex.response && ex.response.data && JSON.stringify(ex.response.data)) || "Delete failed";
-          ims.showToast(msg, "danger");
-        });
+    document.getElementById("filterAll").addEventListener("click", function () {
+      setActiveCategory("all");
     });
 
-    document.getElementById("filterAll").addEventListener("click", function () {
+    document.getElementById("clearFilters").addEventListener("click", function () {
+      document.getElementById("searchQ").value = "";
+      FILTERS.forEach(function (entry) {
+        var el = document.getElementById(entry[1]);
+        if (el) el.value = "";
+      });
+      lowStockOnly = false;
       setActiveCategory("all");
     });
 
@@ -248,6 +301,9 @@
     document.getElementById("categoryFilterSelect").addEventListener("change", function () {
       setActiveCategory(this.value);
     });
+
+    document.getElementById("statusFilter").addEventListener("change", renderRows);
+
   })();
 </script>
 {% endblock %}

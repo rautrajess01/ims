@@ -11,7 +11,7 @@
   <div class="page-shell">
     <div class="row g-3">
       <div class="col-md-4">
-        <a class="content-panel content-panel-muted dashboard-kpi-card h-100 p-0 text-decoration-none text-dark" id="kpiLowCard" href="/inventory/">
+        <a class="content-panel content-panel-muted dashboard-kpi-card h-100 p-0 text-decoration-none text-dark" id="kpiLowCard" href="/inventory/?low_stock=1">
           <div class="dashboard-kpi-body">
             <div class="text-secondary small dashboard-kpi-label">Low stock items</div>
             <div class="dashboard-kpi-value" id="kpiLowCount">—</div>
@@ -19,7 +19,7 @@
         </a>
       </div>
       <div class="col-md-4">
-        <a class="content-panel content-panel-muted dashboard-kpi-card h-100 p-0 text-decoration-none text-dark" id="kpiOutCard" href="/inventory/">
+        <a class="content-panel content-panel-muted dashboard-kpi-card h-100 p-0 text-decoration-none text-dark" id="kpiOutCard" href="/inventory/?status=out_of_stock">
           <div class="dashboard-kpi-body">
             <div class="text-secondary small dashboard-kpi-label">Out of stock items</div>
             <div class="dashboard-kpi-value" id="kpiOutCount">—</div>
@@ -27,7 +27,7 @@
         </a>
       </div>
       <div class="col-md-4">
-        <a class="content-panel content-panel-muted dashboard-kpi-card h-100 p-0 text-decoration-none text-dark" id="kpiRecentCard" href="/inventory/">
+        <a class="content-panel content-panel-muted dashboard-kpi-card h-100 p-0 text-decoration-none text-dark" id="kpiRecentCard" href="/inventory/" data-recent-card>
           <div class="dashboard-kpi-body">
             <div class="text-secondary small dashboard-kpi-label">Recently updated (7d)</div>
             <div class="dashboard-kpi-value" id="kpiRecentCount">—</div>
@@ -38,13 +38,11 @@
     <div class="content-panel content-panel-muted p-3 p-lg-4 mt-3">
       <div class="d-flex justify-content-between align-items-start flex-wrap gap-3">
         <div>
-          <div class="h5 mb-1">Stock status</div>
-          <div class="text-secondary small">Counts by current status.</div>
+          <div class="h5 mb-0">Category totals</div>
         </div>
-        <a class="btn btn-sm btn-outline-secondary" href="/inventory/">View inventory</a>
       </div>
-      <div class="row g-3 mt-1" id="statusCards">
-        <div class="col-12"><div class="ims-loading" style="height:18px"></div></div>
+      <div class="dashboard-category-grid mt-3" id="categoryCards">
+        <div class="ims-loading" style="height:18px"></div>
       </div>
     </div>
     <div class="d-none text-center" id="dashboardRetryWrap">
@@ -63,48 +61,38 @@
       document.getElementById("kpiLowCount").textContent = "…";
       document.getElementById("kpiOutCount").textContent = "…";
       document.getElementById("kpiRecentCount").textContent = "…";
-      var statusCards = document.getElementById("statusCards");
-      statusCards.innerHTML = '<div class="col-12"><div class="ims-loading" style="height:18px"></div></div>';
+      document.getElementById("categoryCards").innerHTML = '<div class="ims-loading" style="height:18px"></div>';
       return ims.api
         .get("/dashboard/")
         .then(function (res) {
           var d = res.data;
-          var low = d.low_stock_items || [];
           var byStatus = d.count_by_status || {};
+          var categoryTotals = d.category_totals || [];
           var now = Date.now();
           var recentWindow = 7 * 24 * 60 * 60 * 1000;
-          var recent = low.filter(function (it) {
-            if (!it.last_updated) return false;
-            return now - new Date(it.last_updated).getTime() <= recentWindow;
-          });
-          document.getElementById("kpiLowCount").textContent = low.length;
-          document.getElementById("kpiOutCount").textContent = low.filter(function (it) { return Number(it.quantity) <= 0; }).length;
-          document.getElementById("kpiRecentCount").textContent = recent.length;
+          var updatedAfter = new Date(now - recentWindow).toISOString();
+          document.getElementById("kpiLowCount").textContent = d.low_stock_count || 0;
+          document.getElementById("kpiOutCount").textContent = byStatus.out_of_stock || 0;
+          document.getElementById("kpiRecentCount").textContent = d.recent_updated_count || 0;
+          document.querySelector("[data-recent-card]").href = "/inventory/?updated_after=" + encodeURIComponent(updatedAfter);
 
-          var statusMeta = [
-            { key: "in_stock", label: "In stock" },
-            { key: "deployed", label: "Deployed" },
-            { key: "out_of_stock", label: "Out of stock" },
-            { key: "faulty", label: "Faulty" },
-            { key: "na", label: "N/A" },
-          ];
-
-          statusCards.innerHTML = "";
-          statusMeta.forEach(function (st) {
-            var count = byStatus[st.key] || 0;
-            var col = document.createElement("div");
-            col.className = "col-6 col-md-4 col-lg-2";
-            col.innerHTML =
-              '<div class="content-panel p-3 h-100" style="border-radius:10px">' +
-              '<div class="small text-secondary">' + ims.escapeHtml(st.label) + '</div>' +
-              '<div class="h4 mb-0" style="color:#1a3a2e">' + ims.escapeHtml(count) + "</div>" +
-              "</div>";
-            statusCards.appendChild(col);
+          var categoryCards = document.getElementById("categoryCards");
+          categoryCards.innerHTML = "";
+          categoryTotals.forEach(function (cat) {
+            var card = document.createElement("a");
+            card.className = "dashboard-category-card text-decoration-none";
+            card.href = "/inventory/?category=" + encodeURIComponent(cat.id);
+            card.innerHTML =
+              '<span class="dashboard-category-name">' + ims.escapeHtml(cat.name || cat.full_name) + '</span>' +
+              '<strong>' + ims.escapeHtml(cat.total_count || 0) + '</strong>';
+            categoryCards.appendChild(card);
           });
+          if (!categoryCards.children.length) {
+            categoryCards.innerHTML = '<div class="text-secondary small">No categories yet.</div>';
+          }
         })
         .catch(function () {
-          var statusCards = document.getElementById("statusCards");
-          statusCards.innerHTML = '<div class="text-danger small">Could not load dashboard data.</div>';
+          document.getElementById("categoryCards").innerHTML = '<div class="text-danger small">Could not load category totals.</div>';
           retryWrap.classList.remove("d-none");
           ims.showToast("Could not load dashboard", "danger");
         });

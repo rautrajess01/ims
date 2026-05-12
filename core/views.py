@@ -2,16 +2,18 @@ import csv
 import io
 import json
 import secrets
+from datetime import timedelta
 
 from django.contrib.auth import get_user_model
 from django.db.models.deletion import ProtectedError
 from django.db.models import Count
 from django.http import HttpResponse
 from django.shortcuts import render
+from django.utils import timezone
 from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
-from rest_framework.parsers import FormParser, MultiPartParser
+from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -32,6 +34,7 @@ from .serializers import (
     InventoryItemWriteSerializer,
     InventoryLogSerializer,
     InventoryLogWriteSerializer,
+    get_child_type_schemas,
 )
 
 User = get_user_model()
@@ -81,13 +84,18 @@ class CategoryViewSet(viewsets.ModelViewSet):
         roots = self.get_queryset().filter(parent__isnull=True).order_by("name")
         return Response(CategoryTreeSerializer(roots, many=True).data)
 
+    @action(detail=False, methods=["get"], url_path="child-schemas")
+    def child_schemas(self, request):
+        return Response(get_child_type_schemas())
+
 
 class InventoryItemViewSet(viewsets.ModelViewSet):
     queryset = InventoryItem.objects.select_related("category", "category__parent").all()
     permission_classes = [IsStaffOrSuperuserWriteOrReadOnly]
+    parser_classes = [JSONParser, MultiPartParser, FormParser]
     filterset_class = InventoryItemFilter
-    search_fields = ("remark",)
-    ordering_fields = ("created_at", "last_updated", "quantity", "id")
+    search_fields = ("name", "specs", "brand", "remark", "activity_note", "category__name", "category__parent__name")
+    ordering_fields = ("created_at", "last_updated", "quantity", "id", "name", "specs", "brand", "status")
     ordering = ["-last_updated"]
 
     def get_serializer_class(self):
@@ -102,7 +110,7 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
             quantity_before=instance.quantity,
             quantity_after=instance.quantity,
             deployed_to="",
-            notes=f"Removed item id={instance.pk}: {instance.display_name}",
+            notes=f"Removed item: {instance.display_name}",
             performed_by=self.request.user,
         )
         instance.delete()
@@ -162,14 +170,37 @@ class DashboardAPIView(APIView):
         total_items = InventoryItem.objects.count()
         by_cat = {}
         by_parent_cat = {}
+        category_totals = {
+            cat.id: {
+                "id": cat.id,
+                "name": cat.name,
+                "full_name": cat.full_name,
+                "parent": cat.parent_id,
+                "depth": cat.depth,
+                "is_leaf": cat.is_leaf,
+                "item_count": 0,
+                "total_count": 0,
+            }
+            for cat in Category.objects.select_related("parent", "parent__parent").prefetch_related("children")
+        }
         for row in InventoryItem.objects.select_related("category", "category__parent").only("id", "category_id"):
             key = row.category.full_name
             by_cat[key] = by_cat.get(key, 0) + 1
+            if row.category_id in category_totals:
+                category_totals[row.category_id]["item_count"] += 1
+            parent = row.category
+            while parent is not None:
+                if parent.id in category_totals:
+                    category_totals[parent.id]["total_count"] += 1
+                parent = parent.parent
             parent = row.category
             while parent.parent is not None:
                 parent = parent.parent
             by_parent_cat[parent.name] = by_parent_cat.get(parent.name, 0) + 1
         by_status = dict(InventoryItem.objects.values("status").annotate(c=Count("id")).values_list("status", "c"))
+        recent_updated_count = InventoryItem.objects.filter(
+            last_updated__gte=timezone.now() - timedelta(days=7)
+        ).count()
         recent = InventoryLog.objects.select_related("item", "item__category", "performed_by").order_by(
             "-timestamp"
         )[:10]
@@ -178,10 +209,17 @@ class DashboardAPIView(APIView):
             .filter(quantity__lte=2)
             .order_by("quantity", "id")[:50]
         )
+        low_stock_count = InventoryItem.objects.filter(quantity__lte=2).count()
         body = {
             "count_by_category": by_cat,
             "count_by_parent_category": by_parent_cat,
+            "category_totals": sorted(
+                category_totals.values(),
+                key=lambda cat: (cat["full_name"].lower(), cat["id"]),
+            ),
             "count_by_status": by_status,
+            "recent_updated_count": recent_updated_count,
+            "low_stock_count": low_stock_count,
             "total_items": total_items,
             "recent_logs": recent,
             "low_stock_items": low_stock,
@@ -213,27 +251,44 @@ class ExportItemsAPIView(APIView):
             [
                 "id",
                 "category",
+                "name",
                 "specs",
-                "capacity",
-                "custom_values",
+                "brand",
+                "capacity_value",
+                "capacity_unit",
+                "child_data",
                 "quantity",
                 "status",
                 "remark",
+                "activity_note",
                 "created_at",
                 "last_updated",
             ]
         )
         for row in InventoryItem.objects.select_related("category").order_by("id").iterator():
+            child = row.get_child()
+            child_data = {}
+            if child is not None:
+                for field in child._meta.get_fields():
+                    if field.name == "id" or field.name == "inventory_item":
+                        continue
+                    val = getattr(child, field.name)
+                    if val is not None:
+                        child_data[field.name] = val
             writer.writerow(
                 [
                     row.id,
                     row.category.full_name,
+                    row.name,
                     row.specs,
-                    row.capacity,
-                    json.dumps(row.custom_values),
+                    row.brand or "",
+                    row.capacity_value,
+                    row.capacity_unit or "",
+                    json.dumps(child_data),
                     row.quantity,
                     row.status,
                     row.remark,
+                    row.activity_note,
                     row.created_at.isoformat() if row.created_at else "",
                     row.last_updated.isoformat() if row.last_updated else "",
                 ]
@@ -328,18 +383,13 @@ class ImportItemsAPIView(APIView):
                 }
                 st = st_map.get(st_raw.lower(), st_raw) or InventoryItem.Status.IN_STOCK
                 specs = (row.get(col("specs")) or "").strip()
-                capacity = str(row.get(col("capacity")) or "").strip() if "capacity" in normalize else ""
+                name = str(row.get(col("name")) or "").strip() if "name" in normalize else specs
                 remark = str(row.get(col("remark")) or "").strip() if "remark" in normalize else ""
-                custom_values = {}
-                if "custom_values" in normalize:
-                    custom_values = json.loads((row.get(col("custom_values")) or "{}").strip() or "{}")
-                # Backward compatibility: if a CSV embeds specs/capacity inside custom_values, hoist them.
-                if not specs:
-                    specs = str(custom_values.get("specs") or "").strip()
-                if not capacity:
-                    capacity = str(custom_values.get("capacity") or "").strip()
-                custom_values.pop("specs", None)
-                custom_values.pop("capacity", None)
+                child_data = {}
+                if "child_data" in normalize:
+                    child_data = json.loads((row.get(col("child_data")) or "{}").strip() or "{}")
+                elif "meta" in normalize:
+                    child_data = json.loads((row.get(col("meta")) or "{}").strip() or "{}")
                 category = self.resolve_category(cat_name)
                 if not category:
                     errors.append({"row": i, "error": f"Unknown category: {cat_name}"})
@@ -348,26 +398,19 @@ class ImportItemsAPIView(APIView):
                     errors.append({"row": i, "error": "Missing specs"})
                     continue
                 data = {
-                    "category": category,
+                    "category": category.id,
+                    "name": name,
                     "specs": specs,
-                    "capacity": capacity,
-                    "custom_values": custom_values,
+                    "child_data": child_data,
                     "quantity": qty,
                     "status": st,
                     "remark": remark,
                 }
                 if qty == 0:
                     data["status"] = InventoryItem.Status.OUT_OF_STOCK
-                item = InventoryItem.objects.create(**data)
-                InventoryLog.objects.create(
-                    item=item,
-                    action=InventoryLog.Action.ADDED,
-                    quantity_before=0,
-                    quantity_after=item.quantity,
-                    deployed_to="",
-                    notes="Imported from CSV",
-                    performed_by=request.user,
-                )
+                serializer = InventoryItemWriteSerializer(data=data, context={"request": request})
+                serializer.is_valid(raise_exception=True)
+                item = serializer.save(log_note="Imported from CSV")
                 created += 1
             except Exception as exc:  # noqa: BLE001
                 errors.append({"row": i, "error": str(exc)})
