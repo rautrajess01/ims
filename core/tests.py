@@ -5,15 +5,29 @@ from django.db.models import ProtectedError
 from rest_framework import status
 from rest_framework.test import APITestCase
 
-from .models import Category, InventoryItem, InventoryLog
+from .models import AttributeChoice, Category, InventoryItem, InventoryLog
 
 User = get_user_model()
+
+
+def create_status_choices():
+    for index, (key, value) in enumerate(
+        [
+            (InventoryItem.Status.IN_STOCK, "In stock"),
+            (InventoryItem.Status.DEPLOYED, "Deployed"),
+            (InventoryItem.Status.OUT_OF_STOCK, "Out of stock"),
+            (InventoryItem.Status.NA, "N/A"),
+            (InventoryItem.Status.FAULTY, "Faulty"),
+        ]
+    ):
+        AttributeChoice.objects.create(category="status", key=key, value=value, sort_order=index)
 
 
 class CategoryHierarchyTests(APITestCase):
     def setUp(self):
         self.user = User.objects.create_user(username="tester", password="secret123", is_staff=True)
         self.client.force_authenticate(self.user)
+        create_status_choices()
 
     def test_item_cannot_be_assigned_to_parent_category(self):
         parent = Category.objects.create(name="Lab")
@@ -98,6 +112,7 @@ class RoleAndAdminApiTests(APITestCase):
         )
         self.regular = User.objects.create_user(username="reader", email="reader@example.com", password="secret123")
         self.category = Category.objects.create(name="Switches")
+        create_status_choices()
 
     def test_auth_me_returns_current_role(self):
         self.client.force_authenticate(self.superuser)
@@ -147,7 +162,6 @@ class RoleAndAdminApiTests(APITestCase):
             "/api/v1/items/",
             {
                 "category": self.category.id,
-                "name": "Test Switch",
                 "specs": "24-port switch",
                 "brand": "Cisco",
                 "capacity_value": 24,
@@ -160,7 +174,7 @@ class RoleAndAdminApiTests(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         item = InventoryItem.objects.get(id=response.data["id"])
-        self.assertEqual(item.name, "Test Switch")
+        self.assertEqual(item.display_name, "24-port switch")
         self.assertEqual(item.brand, "Cisco")
         self.assertEqual(item.capacity_value, 24)
         self.assertEqual(item.capacity_unit, "ports")
@@ -209,14 +223,14 @@ class RoleAndAdminApiTests(APITestCase):
 
     def test_inventory_item_create_with_child_data_creates_child(self):
         self.client.force_authenticate(self.staff)
-        sfp_cat = Category.objects.create(name="SFP", child_type="sfp")
+        switch_cat = Category.objects.create(name="Switch", child_type="switch")
 
         response = self.client.post(
             "/api/v1/items/",
             {
-                "category": sfp_cat.id,
-                "specs": "SFP-1G",
-                "child_data": {"sfp_type": "Multimode"},
+                "category": switch_cat.id,
+                "specs": "Switch-10G",
+                "child_data": {"ports_1g": 24, "ports_10g": 4},
                 "quantity": 2,
                 "status": InventoryItem.Status.IN_STOCK,
             },
@@ -226,17 +240,18 @@ class RoleAndAdminApiTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         item = InventoryItem.objects.get(id=response.data["id"])
         self.assertIsNotNone(item.get_child())
-        self.assertEqual(item.get_child().sfp_type, "Multimode")
+        self.assertEqual(item.get_child().ports_1g, 24)
+        self.assertEqual(item.get_child().ports_10g, 4)
 
     def test_inventory_item_read_returns_child_data(self):
         self.client.force_authenticate(self.staff)
-        sfp_cat = Category.objects.create(name="SFP", child_type="sfp")
+        switch_cat = Category.objects.create(name="Switch", child_type="switch")
         response = self.client.post(
             "/api/v1/items/",
             {
-                "category": sfp_cat.id,
-                "specs": "SFP-1G",
-                "child_data": {"sfp_type": "Single-mode"},
+                "category": switch_cat.id,
+                "specs": "Switch-10G",
+                "child_data": {"ports_1g": 24, "ports_10g": 4},
                 "quantity": 1,
                 "status": InventoryItem.Status.IN_STOCK,
             },
@@ -247,7 +262,8 @@ class RoleAndAdminApiTests(APITestCase):
         read_resp = self.client.get(f"/api/v1/items/{item_id}/")
 
         self.assertEqual(read_resp.status_code, status.HTTP_200_OK)
-        self.assertEqual(read_resp.data["child"]["sfp_type"], "Single-mode")
+        self.assertEqual(read_resp.data["child"]["ports_1g"], 24)
+        self.assertEqual(read_resp.data["child"]["ports_10g"], 4)
 
     def test_inventory_item_update_persists_activity_note(self):
         item = InventoryItem.objects.create(

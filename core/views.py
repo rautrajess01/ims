@@ -5,12 +5,12 @@ import secrets
 from datetime import timedelta
 
 from django.contrib.auth import get_user_model
-from django.db.models.deletion import ProtectedError
 from django.db.models import Count
+from django.db.models.deletion import ProtectedError
 from django.http import HttpResponse
 from django.shortcuts import render
 from django.utils import timezone
-from rest_framework import mixins, status, viewsets
+from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
@@ -20,10 +20,11 @@ from rest_framework.views import APIView
 from rest_framework_simplejwt.views import TokenBlacklistView, TokenObtainPairView, TokenRefreshView
 
 from .filters import InventoryItemFilter, InventoryLogFilter
-from .models import Category, InventoryItem, InventoryLog
+from .models import AttributeChoice, Category, InventoryItem, InventoryLog
 from .permissions import IsStaffOrSuperuserWriteOrReadOnly, IsSuperuser
 from .serializers import (
     AdminUserSerializer,
+    AttributeChoiceSerializer,
     CategorySerializer,
     CategoryTreeSerializer,
     CurrentUserSerializer,
@@ -35,6 +36,7 @@ from .serializers import (
     InventoryLogSerializer,
     InventoryLogWriteSerializer,
     get_child_type_schemas,
+    get_attribute_choice_map,
 )
 
 User = get_user_model()
@@ -89,13 +91,31 @@ class CategoryViewSet(viewsets.ModelViewSet):
         return Response(get_child_type_schemas())
 
 
+class AttributeChoiceViewSet(viewsets.ModelViewSet):
+    queryset = AttributeChoice.objects.all()
+    serializer_class = AttributeChoiceSerializer
+    ordering_fields = ("category", "sort_order", "value", "id")
+    ordering = ["category", "sort_order", "value"]
+    search_fields = ("category", "key", "value")
+    filterset_fields = ("category", "is_active")
+
+    def get_permissions(self):
+        if self.request.method in ("GET", "HEAD", "OPTIONS"):
+            return [IsStaffOrSuperuserWriteOrReadOnly()]
+        return [IsSuperuser()]
+
+    @action(detail=False, methods=["get"], url_path="grouped")
+    def grouped(self, request):
+        return Response(get_attribute_choice_map())
+
+
 class InventoryItemViewSet(viewsets.ModelViewSet):
     queryset = InventoryItem.objects.select_related("category", "category__parent").all()
     permission_classes = [IsStaffOrSuperuserWriteOrReadOnly]
     parser_classes = [JSONParser, MultiPartParser, FormParser]
     filterset_class = InventoryItemFilter
-    search_fields = ("name", "specs", "brand", "remark", "activity_note", "category__name", "category__parent__name")
-    ordering_fields = ("created_at", "last_updated", "quantity", "id", "name", "specs", "brand", "status")
+    search_fields = ("specs", "brand", "remark", "activity_note", "category__name", "category__parent__name")
+    ordering_fields = ("created_at", "last_updated", "quantity", "id", "specs", "brand", "status")
     ordering = ["-last_updated"]
 
     def get_serializer_class(self):
@@ -251,7 +271,6 @@ class ExportItemsAPIView(APIView):
             [
                 "id",
                 "category",
-                "name",
                 "specs",
                 "brand",
                 "capacity_value",
@@ -279,7 +298,6 @@ class ExportItemsAPIView(APIView):
                 [
                     row.id,
                     row.category.full_name,
-                    row.name,
                     row.specs,
                     row.brand or "",
                     row.capacity_value,
@@ -383,7 +401,6 @@ class ImportItemsAPIView(APIView):
                 }
                 st = st_map.get(st_raw.lower(), st_raw) or InventoryItem.Status.IN_STOCK
                 specs = (row.get(col("specs")) or "").strip()
-                name = str(row.get(col("name")) or "").strip() if "name" in normalize else specs
                 remark = str(row.get(col("remark")) or "").strip() if "remark" in normalize else ""
                 child_data = {}
                 if "child_data" in normalize:
@@ -399,7 +416,6 @@ class ImportItemsAPIView(APIView):
                     continue
                 data = {
                     "category": category.id,
-                    "name": name,
                     "specs": specs,
                     "child_data": child_data,
                     "quantity": qty,

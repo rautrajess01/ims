@@ -99,6 +99,23 @@ class Category(models.Model):
         return super().save(*args, **kwargs)
 
 
+class AttributeChoice(models.Model):
+    category = models.CharField(max_length=64)
+    key = models.CharField(max_length=128)
+    value = models.CharField(max_length=128)
+    sort_order = models.PositiveIntegerField(default=0)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ["category", "sort_order", "value"]
+        constraints = [
+            models.UniqueConstraint(fields=["category", "key"], name="uniq_attribute_choice_category_key"),
+        ]
+
+    def __str__(self):
+        return f"{self.category}: {self.value}"
+
+
 class InventoryItem(models.Model):
     class Status(models.TextChoices):
         IN_STOCK = "in_stock", "In stock"
@@ -123,7 +140,6 @@ class InventoryItem(models.Model):
     quantity = models.PositiveIntegerField(default=0)
     status = models.CharField(
         max_length=32,
-        choices=Status.choices,
         default=Status.IN_STOCK,
     )
     remark = models.TextField(blank=True)
@@ -140,12 +156,12 @@ class InventoryItem(models.Model):
         ordering = ["-last_updated"]
 
     def __str__(self):
-        display = (self.name or self.specs or "").strip()
+        display = (self.specs or "").strip()
         return f"{display or 'Inventory item'} ({self.category})"
 
     @property
     def display_name(self):
-        return (self.name or self.specs or "").strip() or "Inventory item"
+        return (self.specs or "").strip() or "Inventory item"
 
     def clean(self):
         super().clean()
@@ -166,16 +182,11 @@ class InventoryItem(models.Model):
 
 
 class SFPItem(models.Model):
-    SFP_TYPE_CHOICES = [
-        ("Electrical", "Electrical"),
-        ("Multimode", "Multimode"),
-        ("Single-mode", "Single-mode"),
-    ]
     inventory_item = models.OneToOneField(
         InventoryItem, on_delete=models.CASCADE, related_name="sfp"
     )
     sfp_type = models.CharField(
-        max_length=32, choices=SFP_TYPE_CHOICES, blank=True, null=True,
+        max_length=32, blank=True, null=True,
     )
     wavelength_nm = models.PositiveIntegerField(blank=True, null=True)
     max_distance_m = models.PositiveIntegerField(blank=True, null=True)
@@ -188,31 +199,17 @@ CHILD_MODEL_REVERSE_NAMES.append("sfp")
 
 
 class StorageItem(models.Model):
-    DRIVE_TYPE_CHOICES = [
-        ("HDD", "HDD"),
-        ("SSD", "SSD"),
-        ("NVMe", "NVMe"),
-    ]
-    BRAND_CHOICES = [
-        ("HP", "HP"), ("Dell", "Dell"), ("Seagate", "Seagate"),
-        ("WD", "WD"), ("Samsung", "Samsung"), ("Orico", "Orico"),
-        ("IBM", "IBM"), ("Other", "Other"),
-    ]
-    INTERFACE_CHOICES = [
-        ("SAS", "SAS"), ("SATA", "SATA"),
-        ("NVMe", "NVMe (PCIe)"), ("SFF", "SFF"), ("Other", "Other"),
-    ]
     inventory_item = models.OneToOneField(
         InventoryItem, on_delete=models.CASCADE, related_name="storage"
     )
     drive_type = models.CharField(
-        max_length=16, choices=DRIVE_TYPE_CHOICES, blank=True, null=True,
+        max_length=16, blank=True, null=True,
     )
     brand = models.CharField(
-        max_length=32, choices=BRAND_CHOICES, blank=True, null=True,
+        max_length=32, blank=True, null=True,
     )
     interface = models.CharField(
-        max_length=16, choices=INTERFACE_CHOICES, blank=True, null=True,
+        max_length=16, blank=True, null=True,
     )
     form_factor = models.CharField(max_length=16, blank=True, null=True)
     rpm = models.PositiveIntegerField(blank=True, null=True)
@@ -224,15 +221,11 @@ CHILD_MODEL_REVERSE_NAMES.append("storage")
 
 
 class SwitchItem(models.Model):
-    BRAND_CHOICES = [
-        ("Cisco", "Cisco"), ("Huawei", "Huawei"),
-        ("Juniper", "Juniper"), ("Other", "Other"),
-    ]
     inventory_item = models.OneToOneField(
         InventoryItem, on_delete=models.CASCADE, related_name="switch"
     )
     brand = models.CharField(
-        max_length=32, choices=BRAND_CHOICES, blank=True, null=True,
+        max_length=32, blank=True, null=True,
     )
     ports_1g = models.PositiveIntegerField(blank=True, null=True)
     ports_10g = models.PositiveIntegerField(blank=True, null=True)
@@ -248,17 +241,11 @@ CHILD_MODEL_REVERSE_NAMES.append("switch")
 
 
 class CableItem(models.Model):
-    CABLE_TYPE_CHOICES = [
-        ("Cat5e", "Cat 5e"), ("Cat6", "Cat 6"), ("Cat6A", "Cat 6A"),
-        ("Cat7", "Cat 7"), ("Fiber-MM", "Fiber — Multimode"),
-        ("Fiber-SM", "Fiber — Single-mode"), ("DAC", "DAC / Twinax"),
-        ("Power", "Power Cable"), ("Other", "Other"),
-    ]
     inventory_item = models.OneToOneField(
         InventoryItem, on_delete=models.CASCADE, related_name="cable"
     )
     cable_type = models.CharField(
-        max_length=32, choices=CABLE_TYPE_CHOICES, blank=True, null=True,
+        max_length=32, blank=True, null=True,
     )
     length_m = models.FloatField(blank=True, null=True)
     connector_a = models.CharField(max_length=32, blank=True, null=True)
@@ -271,22 +258,14 @@ CHILD_MODEL_REVERSE_NAMES.append("cable")
 
 
 class RAMItem(models.Model):
-    MEMORY_TYPE_CHOICES = [
-        ("DDR3", "DDR3"), ("DDR4", "DDR4"), ("DDR5", "DDR5"),
-        ("ECC", "ECC"), ("Other", "Other"),
-    ]
-    FORM_FACTOR_CHOICES = [
-        ("DIMM", "DIMM"), ("SODIMM", "SO-DIMM"),
-        ("LRDIMM", "LRDIMM"), ("RDIMM", "RDIMM"),
-    ]
     inventory_item = models.OneToOneField(
         InventoryItem, on_delete=models.CASCADE, related_name="ram"
     )
     memory_type = models.CharField(
-        max_length=16, choices=MEMORY_TYPE_CHOICES, blank=True, null=True,
+        max_length=16, blank=True, null=True,
     )
     form_factor = models.CharField(
-        max_length=16, choices=FORM_FACTOR_CHOICES, blank=True, null=True,
+        max_length=16, blank=True, null=True,
     )
     speed_mhz = models.PositiveIntegerField(blank=True, null=True)
     ecc = models.BooleanField(default=False)
@@ -298,15 +277,11 @@ CHILD_MODEL_REVERSE_NAMES.append("ram")
 
 
 class CPUItem(models.Model):
-    ARCH_CHOICES = [
-        ("x86_64", "x86-64"), ("ARM64", "ARM64 / AArch64"),
-        ("POWER", "IBM POWER"), ("Other", "Other"),
-    ]
     inventory_item = models.OneToOneField(
         InventoryItem, on_delete=models.CASCADE, related_name="cpu"
     )
     architecture = models.CharField(
-        max_length=16, choices=ARCH_CHOICES, blank=True, null=True,
+        max_length=16, blank=True, null=True,
     )
     core_count = models.PositiveIntegerField(blank=True, null=True)
     thread_count = models.PositiveIntegerField(blank=True, null=True)

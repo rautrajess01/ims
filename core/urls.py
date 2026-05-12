@@ -4,6 +4,7 @@ from rest_framework.routers import DefaultRouter
 
 from .views import (
     AdminUserViewSet,
+    AttributeChoiceViewSet,
     CategoryViewSet,
     CurrentUserAPIView,
     DashboardAPIView,
@@ -20,6 +21,7 @@ from .views import (
 
 router = DefaultRouter()
 router.register(r"categories", CategoryViewSet, basename="category")
+router.register(r"attribute-choices", AttributeChoiceViewSet, basename="attribute-choice")
 router.register(r"items", InventoryItemViewSet, basename="item")
 router.register(r"logs", InventoryLogViewSet, basename="log")
 router.register(r"admin/users", AdminUserViewSet, basename="admin-user")

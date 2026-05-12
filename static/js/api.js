@@ -13,6 +13,7 @@
   const raw = axios.create({ baseURL: API_BASE });
   let categoryTreePromise = null;
   let childTypeSchemasPromise = null;
+  let attributeChoicesPromise = null;
   let inventoryItemsPromise = null;
   let currentUserPromise = null;
 
@@ -276,7 +277,7 @@
 
   function renderItemImage(item, extraClass) {
     var url = itemImageUrl(item);
-    var label = ((item && (item.display_name || item.name || item.specs)) || "Item").trim();
+    var label = ((item && (item.display_name || item.specs)) || "Item").trim();
     var classes = "item-thumb" + (extraClass ? " " + extraClass : "");
     if (url) {
       return (
@@ -525,6 +526,16 @@
       });
     }
     return childTypeSchemasPromise;
+  }
+
+  function getAttributeChoices(force) {
+    if (force) attributeChoicesPromise = null;
+    if (!attributeChoicesPromise) {
+      attributeChoicesPromise = raw.get("/attribute-choices/grouped/").then(function (res) {
+        return res.data || {};
+      });
+    }
+    return attributeChoicesPromise;
   }
 
   function loadCurrentUser(force) {
@@ -1031,6 +1042,7 @@
     getCategoryTree: getCategoryTree,
     getInventoryItems: getInventoryItems,
     getChildTypeSchemas: getChildTypeSchemas,
+    getAttributeChoices: getAttributeChoices,
     initSidebar: initSidebar,
     applyPermissionVisibility: applyPermissionVisibility,
     bootstrapPage: bootstrapPage,

@@ -3,6 +3,7 @@ from django import forms
 from simple_history.admin import SimpleHistoryAdmin
 
 from .models import (
+    AttributeChoice,
     CPUItem,
     CableItem,
     Category,
@@ -50,10 +51,10 @@ class CategoryAdmin(admin.ModelAdmin):
 class InventoryItemAdmin(SimpleHistoryAdmin):
     form = InventoryItemAdminForm
     list_display = (
-        "id", "category", "display_name", "name", "quantity", "status", "last_updated",
+        "id", "category", "display_name", "quantity", "status", "last_updated",
     )
     list_filter = ("category", "status")
-    search_fields = ("remark", "name", "specs")
+    search_fields = ("remark", "specs")
 
 
 @admin.register(InventoryLog)
@@ -62,6 +63,14 @@ class InventoryLogAdmin(admin.ModelAdmin):
     list_filter = ("action", "timestamp")
     search_fields = ("notes", "deployed_to", "item__remark")
     readonly_fields = ("timestamp",)
+
+
+@admin.register(AttributeChoice)
+class AttributeChoiceAdmin(admin.ModelAdmin):
+    list_display = ("id", "category", "key", "value", "sort_order", "is_active")
+    list_filter = ("category", "is_active")
+    search_fields = ("category", "key", "value")
+    ordering = ("category", "sort_order", "value")
 
 
 @admin.register(SFPItem)

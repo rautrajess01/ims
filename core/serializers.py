@@ -7,6 +7,7 @@ from rest_framework import serializers
 from simple_history.utils import update_change_reason
 
 from .models import (
+    AttributeChoice,
     CHILD_MODEL_REVERSE_NAMES,
     CPUItem,
     CableItem,
@@ -20,15 +21,37 @@ from .models import (
     SwitchItem,
 )
 
-STORAGE_FIELDS = {"drive_type", "brand", "interface", "form_factor", "rpm"}
-SFP_FIELDS = {"sfp_type", "wavelength_nm", "max_distance_m", "connector_type"}
-SWITCH_FIELDS = {"brand", "ports_1g", "ports_10g", "ports_25g", "ports_40g", "ports_100g", "ports_other"}
-CABLE_FIELDS = {"cable_type", "length_m", "connector_a", "connector_b"}
-RAM_FIELDS = {"memory_type", "form_factor", "speed_mhz", "ecc"}
-CPU_FIELDS = {"architecture", "core_count", "thread_count", "base_clock_ghz", "socket", "tdp_w"}
-MISC_FIELDS = {"item_type"}
+STORAGE_FIELDS = {"drive_type", "brand", "interface"}
+SFP_FIELDS = set()
+SWITCH_FIELDS = {"ports_1g", "ports_10g"}
+CABLE_FIELDS = {"cable_type", "length_m"}
+RAM_FIELDS = set()
+CPU_FIELDS = set()
+MISC_FIELDS = set()
+
+ATTRIBUTE_CHOICE_FIELD_MAP = {
+    ("storage", "drive_type"): "storage_drive_type",
+    ("storage", "brand"): "storage_brand",
+    ("storage", "interface"): "storage_interface",
+    ("cable", "cable_type"): "cable_type",
+}
+ATTRIBUTE_CHOICE_CATEGORIES = set(ATTRIBUTE_CHOICE_FIELD_MAP.values()) | {"status"}
 
 User = get_user_model()
+
+
+def get_attribute_choice_map():
+    choices = {}
+    qs = AttributeChoice.objects.filter(is_active=True).order_by("category", "sort_order", "value")
+    for choice in qs:
+        choices.setdefault(choice.category, []).append({"key": choice.key, "value": choice.value})
+    return choices
+
+
+def get_active_choice_keys(category):
+    return set(
+        AttributeChoice.objects.filter(category=category, is_active=True).values_list("key", flat=True)
+    )
 
 
 def get_user_role(user):
@@ -47,53 +70,60 @@ def sync_child_model(item, child_data):
 
     if child_type == "storage":
         defaults = {k: v for k, v in child_data.items() if k in STORAGE_FIELDS}
-        StorageItem.objects.update_or_create(
-            inventory_item=item,
-            defaults=defaults,
-        )
-        active.add("storage")
+        if STORAGE_FIELDS:
+            StorageItem.objects.update_or_create(
+                inventory_item=item,
+                defaults=defaults,
+            )
+            active.add("storage")
     elif child_type == "sfp":
         defaults = {k: v for k, v in child_data.items() if k in SFP_FIELDS}
-        SFPItem.objects.update_or_create(
-            inventory_item=item,
-            defaults=defaults,
-        )
-        active.add("sfp")
+        if SFP_FIELDS:
+            SFPItem.objects.update_or_create(
+                inventory_item=item,
+                defaults=defaults,
+            )
+            active.add("sfp")
     elif child_type == "switch":
         defaults = {k: v for k, v in child_data.items() if k in SWITCH_FIELDS}
-        SwitchItem.objects.update_or_create(
-            inventory_item=item,
-            defaults=defaults,
-        )
-        active.add("switch")
+        if SWITCH_FIELDS:
+            SwitchItem.objects.update_or_create(
+                inventory_item=item,
+                defaults=defaults,
+            )
+            active.add("switch")
     elif child_type == "ram":
         defaults = {k: v for k, v in child_data.items() if k in RAM_FIELDS}
-        RAMItem.objects.update_or_create(
-            inventory_item=item,
-            defaults=defaults,
-        )
-        active.add("ram")
+        if RAM_FIELDS:
+            RAMItem.objects.update_or_create(
+                inventory_item=item,
+                defaults=defaults,
+            )
+            active.add("ram")
     elif child_type == "cpu":
         defaults = {k: v for k, v in child_data.items() if k in CPU_FIELDS}
-        CPUItem.objects.update_or_create(
-            inventory_item=item,
-            defaults=defaults,
-        )
-        active.add("cpu")
+        if CPU_FIELDS:
+            CPUItem.objects.update_or_create(
+                inventory_item=item,
+                defaults=defaults,
+            )
+            active.add("cpu")
     elif child_type == "misc":
         defaults = {k: v for k, v in child_data.items() if k in MISC_FIELDS}
-        MiscItem.objects.update_or_create(
-            inventory_item=item,
-            defaults=defaults,
-        )
-        active.add("misc")
+        if MISC_FIELDS:
+            MiscItem.objects.update_or_create(
+                inventory_item=item,
+                defaults=defaults,
+            )
+            active.add("misc")
     elif child_type == "cable":
         defaults = {k: v for k, v in child_data.items() if k in CABLE_FIELDS}
-        CableItem.objects.update_or_create(
-            inventory_item=item,
-            defaults=defaults,
-        )
-        active.add("cable")
+        if CABLE_FIELDS:
+            CableItem.objects.update_or_create(
+                inventory_item=item,
+                defaults=defaults,
+            )
+            active.add("cable")
 
     for attr in CHILD_MODEL_REVERSE_NAMES:
         if attr not in active:
@@ -295,43 +325,43 @@ class CategoryTreeSerializer(serializers.ModelSerializer):
 class SFPItemSerializer(serializers.ModelSerializer):
     class Meta:
         model = SFPItem
-        fields = ("sfp_type", "wavelength_nm", "max_distance_m", "connector_type")
+        fields = ()
 
 
 class StorageItemSerializer(serializers.ModelSerializer):
     class Meta:
         model = StorageItem
-        fields = ("drive_type", "brand", "interface", "form_factor", "rpm")
+        fields = ("drive_type", "brand", "interface")
 
 
 class SwitchItemSerializer(serializers.ModelSerializer):
     class Meta:
         model = SwitchItem
-        fields = ("brand", "ports_1g", "ports_10g", "ports_25g", "ports_40g", "ports_100g", "ports_other")
+        fields = ("ports_1g", "ports_10g")
 
 
 class CableItemSerializer(serializers.ModelSerializer):
     class Meta:
         model = CableItem
-        fields = ("cable_type", "length_m", "connector_a", "connector_b")
+        fields = ("cable_type", "length_m")
 
 
 class RAMItemSerializer(serializers.ModelSerializer):
     class Meta:
         model = RAMItem
-        fields = ("memory_type", "form_factor", "speed_mhz", "ecc")
+        fields = ()
 
 
 class CPUItemSerializer(serializers.ModelSerializer):
     class Meta:
         model = CPUItem
-        fields = ("architecture", "core_count", "thread_count", "base_clock_ghz", "socket", "tdp_w")
+        fields = ()
 
 
 class MiscItemSerializer(serializers.ModelSerializer):
     class Meta:
         model = MiscItem
-        fields = ("item_type",)
+        fields = ()
 
 
 CHILD_SERIALIZER_MAP = {
@@ -346,6 +376,7 @@ CHILD_SERIALIZER_MAP = {
 
 
 def get_child_type_schemas():
+    attribute_choices = get_attribute_choice_map()
     schemas = {}
     for child_type, serializer_class in CHILD_SERIALIZER_MAP.items():
         model = serializer_class.Meta.model
@@ -359,18 +390,25 @@ def get_child_type_schemas():
                 field_type = "float"
             elif model_field.get_internal_type() == "BooleanField":
                 field_type = "boolean"
-            choices = [choice[0] for choice in getattr(model_field, "choices", [])]
+            choice_category = ATTRIBUTE_CHOICE_FIELD_MAP.get((child_type, field_name))
+            choices = attribute_choices.get(choice_category, []) if choice_category else []
             fields.append(
                 {
                     "name": field_name,
                     "label": model_field.verbose_name.title(),
-                    "type": "choice" if choices else field_type,
+                    "type": "choice" if choice_category else field_type,
                     "choices": choices,
                     "required": not model_field.blank and not model_field.null,
                 }
             )
         schemas[child_type] = fields
     return schemas
+
+
+class AttributeChoiceSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = AttributeChoice
+        fields = ("id", "category", "key", "value", "sort_order", "is_active")
 
 
 class InventoryItemSerializer(serializers.ModelSerializer):
@@ -382,7 +420,7 @@ class InventoryItemSerializer(serializers.ModelSerializer):
     class Meta:
         model = InventoryItem
         fields = (
-            "id", "category", "display_name", "name", "specs", "brand",
+            "id", "category", "display_name", "specs", "brand",
             "capacity_value", "capacity_unit", "capacity_display",
             "quantity", "status", "remark", "activity_note",
             "image", "child", "last_updated", "created_at",
@@ -418,7 +456,7 @@ class InventoryItemWriteSerializer(serializers.ModelSerializer):
     class Meta:
         model = InventoryItem
         fields = (
-            "id", "category", "name", "specs", "brand",
+            "id", "category", "specs", "brand",
             "capacity_value", "capacity_unit",
             "quantity", "status", "remark", "activity_note",
             "image", "image_clear", "log_note", "child_data",
@@ -438,6 +476,17 @@ class InventoryItemWriteSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 {"category": "Inventory items can only be assigned to leaf categories."}
             )
+        status_value = attrs.get("status", instance.status if instance is not None else None)
+        quantity_value = attrs.get("quantity", instance.quantity if instance is not None else 0)
+        if quantity_value == 0:
+            status_value = InventoryItem.Status.OUT_OF_STOCK
+        if not status_value:
+            raise serializers.ValidationError({"status": "This field is required."})
+        valid_statuses = get_active_choice_keys("status")
+        if not valid_statuses:
+            raise serializers.ValidationError({"status": "Add status choices before saving inventory items."})
+        if status_value not in valid_statuses:
+            raise serializers.ValidationError({"status": "Select a configured status choice."})
         child_data = attrs.get("child_data")
         if isinstance(child_data, str):
             try:
@@ -461,6 +510,19 @@ class InventoryItemWriteSerializer(serializers.ModelSerializer):
                     raise serializers.ValidationError(
                         {"child_data": f"Unknown field(s) for this category: {', '.join(unknown_fields)}."}
                     )
+                for field_name, choice_category in ATTRIBUTE_CHOICE_FIELD_MAP.items():
+                    child_type_name, child_field_name = field_name
+                    if child_type_name != child_type or child_field_name not in child_data:
+                        continue
+                    valid_choices = get_active_choice_keys(choice_category)
+                    if not valid_choices:
+                        raise serializers.ValidationError(
+                            {"child_data": f"Add choices for {child_field_name.replace('_', ' ')} before saving."}
+                        )
+                    if child_data[child_field_name] not in valid_choices:
+                        raise serializers.ValidationError(
+                            {"child_data": f"Select a configured choice for {child_field_name.replace('_', ' ')}."}
+                        )
                 child_serializer = serializer_class(data=child_data, partial=True)
                 child_serializer.is_valid(raise_exception=True)
                 attrs["child_data"] = child_serializer.validated_data

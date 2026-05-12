@@ -1061,6 +1061,10 @@ html.sidebar-collapsed .sidebar-avatar-only {
   align-items: start;
 }
 
+.editor-shell-full {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .editor-summary {
   position: sticky;
   top: 1.25rem;
@@ -1105,6 +1109,7 @@ html.sidebar-collapsed .sidebar-avatar-only {
 }
 
 .editor-panel {
+  width: 100%;
   max-width: none;
   border-radius: 8px;
 }

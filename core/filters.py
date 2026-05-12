@@ -9,7 +9,7 @@ class InventoryItemFilter(django_filters.FilterSet):
     parent_category = django_filters.NumberFilter(field_name="category__parent_id")
     root_category = django_filters.NumberFilter(method="filter_root_category")
     status = django_filters.CharFilter()
-    name = django_filters.CharFilter(field_name="name", lookup_expr="icontains")
+    name = django_filters.CharFilter(field_name="specs", lookup_expr="icontains")
     specs = django_filters.CharFilter(field_name="specs", lookup_expr="icontains")
     brand = django_filters.CharFilter(field_name="brand", lookup_expr="icontains")
     capacity_unit = django_filters.CharFilter(field_name="capacity_unit", lookup_expr="iexact")

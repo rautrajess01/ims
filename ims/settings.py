@@ -97,11 +97,11 @@ TIME_ZONE = config("TIME_ZONE", default="Asia/Kathmandu")
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 STATIC_URL = "/static/"
-STATIC_ROOT = BASE_DIR / "staticfiles"
+STATIC_ROOT = Path(config("STATIC_ROOT", default="/usr/local/share/ims/staticfiles"))
 STATICFILES_DIRS = [BASE_DIR / "static"]
 
 MEDIA_URL = "/media/"
-MEDIA_ROOT = BASE_DIR / "media"
+MEDIA_ROOT = Path(config("MEDIA_ROOT", default="/usr/local/share/ims/media"))
 
 STORAGES = {
     "default": {

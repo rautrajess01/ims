@@ -135,7 +135,6 @@
       }).join(" ");
       return (
         ((item.category && (item.category.full_name || item.category.name)) || "") +
-        " " + (item.name || "") +
         " " + (item.specs || "") +
         " " + (item.brand || "") +
         " " + (item.capacity_display || "") +
@@ -184,7 +183,7 @@
         ) return false;
         if (q && buildSearchBlob(it).indexOf(q) < 0) return false;
         if (filters.status && it.status !== filters.status) return false;
-        if (filters.name && itemText(it.name || it.display_name).indexOf(filters.name.toLowerCase()) < 0) return false;
+        if (filters.name && itemText(it.specs || it.display_name).indexOf(filters.name.toLowerCase()) < 0) return false;
         if (filters.specs && itemText(it.specs).indexOf(filters.specs.toLowerCase()) < 0) return false;
         if (filters.brand && itemText(it.brand).indexOf(filters.brand.toLowerCase()) < 0) return false;
         if (filters.capacity_unit && itemText(it.capacity_unit).indexOf(filters.capacity_unit.toLowerCase()) < 0) return false;
@@ -218,7 +217,7 @@
         var tr = document.createElement("tr");
         var backParam = encodeURIComponent(window.location.pathname + window.location.search);
         var actions = '<a class="btn btn-sm btn-outline-secondary" href="/item/?id=' + encodeURIComponent(it.id) + "&back=" + backParam + '">View</a>';
-        var specsText = String(it.specs || it.name || it.brand || ims.formatCategoryLeaf(it.category) || "Inventory item").trim();
+        var specsText = String(it.specs || it.brand || ims.formatCategoryLeaf(it.category) || "Inventory item").trim();
         var categoryBadge = '<span class="item-meta-badge">' + ims.escapeHtml(ims.formatCategoryLeaf(it.category) || "—") + "</span>";
         var capacityBadge = '<span class="item-meta-badge">' + ims.escapeHtml((it.capacity_display || "").trim() || "—") + "</span>";
         tr.innerHTML = [

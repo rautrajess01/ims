@@ -8,7 +8,7 @@
       <p class="text-secondary mb-0">Create a new inventory record.</p>
     </div>
   </div>
-  <div class="editor-shell">
+  <div class="editor-shell editor-shell-full">
     <div class="content-panel editor-panel p-4">
       <form id="formItem">
         <div class="mb-3">
@@ -24,16 +24,12 @@
           <div id="catChildFields"></div>
         </div>
         <div class="mb-3">
-          <label class="form-label">Name</label>
-          <input class="form-control" type="text" name="name" placeholder="e.g. Sky Hynex SFP-1G" />
-        </div>
-        <div class="mb-3">
           <label class="form-label">Specs</label>
           <input class="form-control" type="text" name="specs" required placeholder="e.g. 1G SFP module" />
         </div>
         <div class="mb-3">
           <label class="form-label">Brand</label>
-          <input class="form-control" type="text" name="brand" placeholder="e.g. Cisco, HP, Seagate" />
+          <input class="form-control" type="text" name="brand" />
         </div>
         <div class="mb-3">
           <label class="form-label">Image</label>
@@ -65,11 +61,7 @@
         <div class="mb-3">
           <label class="form-label">Status</label>
           <select class="form-select" name="status" id="selStatus">
-            <option value="in_stock">In stock</option>
-            <option value="deployed">Deployed</option>
-            <option value="out_of_stock">Out of stock</option>
-            <option value="na">N/A</option>
-            <option value="faulty">Faulty</option>
+            <option value="">Loading status options...</option>
           </select>
         </div>
         <div class="mb-3">
@@ -97,53 +89,7 @@
   var params = new URLSearchParams(window.location.search);
   var initialCategoryId = params.get("category");
 
-  var CHILD_TYPE_SCHEMA = {
-    ram: [
-      { name: "memory_type", label: "Memory type", type: "choice", choices: ["DDR3", "DDR4", "DDR5", "ECC", "Other"] },
-      { name: "form_factor", label: "Form factor", type: "choice", choices: ["DIMM", "SODIMM", "LRDIMM", "RDIMM"] },
-      { name: "speed_mhz", label: "Speed (MHz)", type: "integer" },
-      { name: "ecc", label: "ECC", type: "boolean" },
-    ],
-    cpu: [
-      { name: "architecture", label: "Architecture", type: "choice", choices: ["x86_64", "ARM64", "POWER", "Other"] },
-      { name: "core_count", label: "Core count", type: "integer" },
-      { name: "thread_count", label: "Thread count", type: "integer" },
-      { name: "base_clock_ghz", label: "Base clock (GHz)", type: "float" },
-      { name: "socket", label: "Socket", type: "string" },
-      { name: "tdp_w", label: "TDP (W)", type: "integer" },
-    ],
-    storage: [
-      { name: "drive_type", label: "Drive type", type: "choice", choices: ["HDD", "SSD", "NVMe"] },
-      { name: "brand", label: "Brand", type: "choice", choices: ["HP", "Dell", "Seagate", "WD", "Samsung", "Orico", "IBM", "Other"] },
-      { name: "interface", label: "Interface", type: "choice", choices: ["SAS", "SATA", "NVMe (PCIe)", "SFF", "Other"] },
-      { name: "form_factor", label: "Form factor", type: "string" },
-      { name: "rpm", label: "RPM", type: "integer" },
-    ],
-    sfp: [
-      { name: "sfp_type", label: "SFP type", type: "choice", choices: ["Electrical", "Multimode", "Single-mode"] },
-      { name: "wavelength_nm", label: "Wavelength (nm)", type: "integer" },
-      { name: "max_distance_m", label: "Max distance (m)", type: "integer" },
-      { name: "connector_type", label: "Connector type", type: "string" },
-    ],
-    switch: [
-      { name: "brand", label: "Brand", type: "choice", choices: ["Cisco", "Huawei", "Juniper", "Other"] },
-      { name: "ports_1g", label: "1G ports", type: "integer" },
-      { name: "ports_10g", label: "10G ports", type: "integer" },
-      { name: "ports_25g", label: "25G ports", type: "integer" },
-      { name: "ports_40g", label: "40G ports", type: "integer" },
-      { name: "ports_100g", label: "100G ports", type: "integer" },
-      { name: "ports_other", label: "Other ports", type: "string" },
-    ],
-    misc: [
-      { name: "item_type", label: "Item type", type: "string" },
-    ],
-    cable: [
-      { name: "cable_type", label: "Cable type", type: "choice", choices: ["Cat5e", "Cat6", "Cat6A", "Cat7", "Fiber-MM", "Fiber-SM", "DAC", "Power Cable", "Other"] },
-      { name: "length_m", label: "Length (m)", type: "float" },
-      { name: "connector_a", label: "Connector A", type: "string" },
-      { name: "connector_b", label: "Connector B", type: "string" },
-    ],
-  };
+  var CHILD_TYPE_SCHEMA = {};
 
   function renderChildField(field, currentValue) {
     var wrapper = document.createElement("div");
@@ -163,10 +109,12 @@
       empty.textContent = "Select an option";
       input.appendChild(empty);
       (field.choices || []).forEach(function (choice) {
+        var choiceValue = typeof choice === "object" ? choice.key : choice;
+        var choiceLabel = typeof choice === "object" ? choice.value : choice;
         var option = document.createElement("option");
-        option.value = choice;
-        option.textContent = choice;
-        if (currentValue === choice) option.selected = true;
+        option.value = choiceValue;
+        option.textContent = choiceLabel;
+        if (currentValue === choiceValue) option.selected = true;
         input.appendChild(option);
       });
     } else if (field.type === "boolean") {
@@ -232,6 +180,27 @@
     wrap.classList.toggle("d-none", !fields.length);
     fields.forEach(function (field) {
       container.appendChild(renderChildField(field, existingValues[field.name]));
+    });
+  }
+
+  function populateStatusChoices(attributeChoices) {
+    var choices = (attributeChoices && attributeChoices.status) || [];
+    var sel = document.getElementById("selStatus");
+    sel.innerHTML = "";
+    if (!choices.length) {
+      var empty = document.createElement("option");
+      empty.value = "";
+      empty.textContent = "No status options configured";
+      sel.appendChild(empty);
+      sel.disabled = true;
+      return;
+    }
+    sel.disabled = false;
+    choices.forEach(function (choice) {
+      var option = document.createElement("option");
+      option.value = choice.key;
+      option.textContent = choice.value;
+      sel.appendChild(option);
     });
   }
 
@@ -310,10 +279,12 @@
     Promise.all([
       ims.getCategoryTree(true),
       ims.getChildTypeSchemas(true).catch(function () { return CHILD_TYPE_SCHEMA; }),
+      ims.getAttributeChoices(true).catch(function () { return {}; }),
     ]).then(function (res) {
       categoryTree = res[0] || [];
       categoryFlat = ims.flattenCategoryTree(categoryTree || []);
       CHILD_TYPE_SCHEMA = res[1] || CHILD_TYPE_SCHEMA;
+      populateStatusChoices(res[2] || {});
       var sel = document.getElementById("selCat");
       renderCategoryOptions(categoryTree, categoryFlat);
       sel.addEventListener("change", function () {
@@ -335,7 +306,6 @@
     var capacityValue = fd.get("capacity_value");
     var payload = {
       category: parseInt(fd.get("category"), 10),
-      name: (fd.get("name") || "").trim(),
       specs: (fd.get("specs") || "").trim(),
       brand: (fd.get("brand") || "").trim() || null,
       capacity_value: capacityValue ? parseFloat(capacityValue) : null,

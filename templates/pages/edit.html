@@ -8,7 +8,8 @@
       <p class="text-secondary mb-0">Update an existing inventory record.</p>
     </div>
   </div>
-  <div class="content-panel p-4" style="max-width: 720px">
+  <div class="editor-shell editor-shell-full">
+    <div class="content-panel editor-panel p-4">
       <form id="formItem">
         <div class="mb-3">
           <label class="form-label">Category</label>
@@ -20,16 +21,12 @@
           <div id="catChildFields"></div>
         </div>
         <div class="mb-3">
-          <label class="form-label">Name</label>
-          <input class="form-control" type="text" name="name" id="fName" placeholder="e.g. Sky Hynex SFP-1G" />
-        </div>
-        <div class="mb-3">
           <label class="form-label">Specs</label>
           <input class="form-control" type="text" name="specs" id="fSpecs" required />
         </div>
         <div class="mb-3">
           <label class="form-label">Brand</label>
-          <input class="form-control" type="text" name="brand" id="fBrand" placeholder="e.g. Cisco, HP, Seagate" />
+          <input class="form-control" type="text" name="brand" id="fBrand" />
         </div>
         <div class="mb-3">
           <label class="form-label">Image</label>
@@ -62,11 +59,7 @@
         <div class="mb-3">
           <label class="form-label">Status</label>
           <select class="form-select" name="status" id="selStatus">
-            <option value="in_stock">In stock</option>
-            <option value="deployed">Deployed</option>
-            <option value="out_of_stock">Out of stock</option>
-            <option value="na">N/A</option>
-            <option value="faulty">Faulty</option>
+            <option value="">Loading status options...</option>
           </select>
         </div>
         <div class="mb-3">
@@ -80,6 +73,7 @@
         <button type="submit" class="btn btn-primary">Update</button>
         <a href="/inventory/" class="btn btn-link text-decoration-none" id="btnCancelEdit">Cancel</a>
       </form>
+    </div>
   </div>
 </div>
 {% endblock %}
@@ -93,53 +87,7 @@
   if (cancelLink) cancelLink.href = backTo;
   var itemData = null;
 
-  var CHILD_TYPE_SCHEMA = {
-    ram: [
-      { name: "memory_type", label: "Memory type", type: "choice", choices: ["DDR3", "DDR4", "DDR5", "ECC", "Other"] },
-      { name: "form_factor", label: "Form factor", type: "choice", choices: ["DIMM", "SODIMM", "LRDIMM", "RDIMM"] },
-      { name: "speed_mhz", label: "Speed (MHz)", type: "integer" },
-      { name: "ecc", label: "ECC", type: "boolean" },
-    ],
-    cpu: [
-      { name: "architecture", label: "Architecture", type: "choice", choices: ["x86_64", "ARM64", "POWER", "Other"] },
-      { name: "core_count", label: "Core count", type: "integer" },
-      { name: "thread_count", label: "Thread count", type: "integer" },
-      { name: "base_clock_ghz", label: "Base clock (GHz)", type: "float" },
-      { name: "socket", label: "Socket", type: "string" },
-      { name: "tdp_w", label: "TDP (W)", type: "integer" },
-    ],
-    storage: [
-      { name: "drive_type", label: "Drive type", type: "choice", choices: ["HDD", "SSD", "NVMe"] },
-      { name: "brand", label: "Brand", type: "choice", choices: ["HP", "Dell", "Seagate", "WD", "Samsung", "Orico", "IBM", "Other"] },
-      { name: "interface", label: "Interface", type: "choice", choices: ["SAS", "SATA", "NVMe (PCIe)", "SFF", "Other"] },
-      { name: "form_factor", label: "Form factor", type: "string" },
-      { name: "rpm", label: "RPM", type: "integer" },
-    ],
-    sfp: [
-      { name: "sfp_type", label: "SFP type", type: "choice", choices: ["Electrical", "Multimode", "Single-mode"] },
-      { name: "wavelength_nm", label: "Wavelength (nm)", type: "integer" },
-      { name: "max_distance_m", label: "Max distance (m)", type: "integer" },
-      { name: "connector_type", label: "Connector type", type: "string" },
-    ],
-    switch: [
-      { name: "brand", label: "Brand", type: "choice", choices: ["Cisco", "Huawei", "Juniper", "Other"] },
-      { name: "ports_1g", label: "1G ports", type: "integer" },
-      { name: "ports_10g", label: "10G ports", type: "integer" },
-      { name: "ports_25g", label: "25G ports", type: "integer" },
-      { name: "ports_40g", label: "40G ports", type: "integer" },
-      { name: "ports_100g", label: "100G ports", type: "integer" },
-      { name: "ports_other", label: "Other ports", type: "string" },
-    ],
-    misc: [
-      { name: "item_type", label: "Item type", type: "string" },
-    ],
-    cable: [
-      { name: "cable_type", label: "Cable type", type: "choice", choices: ["Cat5e", "Cat6", "Cat6A", "Cat7", "Fiber-MM", "Fiber-SM", "DAC", "Power Cable", "Other"] },
-      { name: "length_m", label: "Length (m)", type: "float" },
-      { name: "connector_a", label: "Connector A", type: "string" },
-      { name: "connector_b", label: "Connector B", type: "string" },
-    ],
-  };
+  var CHILD_TYPE_SCHEMA = {};
 
   function renderChildField(field, currentValue) {
     var wrapper = document.createElement("div");
@@ -159,10 +107,12 @@
       empty.textContent = "Select an option";
       input.appendChild(empty);
       (field.choices || []).forEach(function (choice) {
+        var choiceValue = typeof choice === "object" ? choice.key : choice;
+        var choiceLabel = typeof choice === "object" ? choice.value : choice;
         var option = document.createElement("option");
-        option.value = choice;
-        option.textContent = choice;
-        if (currentValue === choice) option.selected = true;
+        option.value = choiceValue;
+        option.textContent = choiceLabel;
+        if (currentValue === choiceValue) option.selected = true;
         input.appendChild(option);
       });
     } else if (field.type === "boolean") {
@@ -238,12 +188,41 @@
     return data;
   }
 
+  function populateStatusChoices(attributeChoices, currentStatus) {
+    var choices = (attributeChoices && attributeChoices.status) || [];
+    var sel = document.getElementById("selStatus");
+    sel.innerHTML = "";
+    if (!choices.length) {
+      if (currentStatus) {
+        var currentOption = document.createElement("option");
+        currentOption.value = currentStatus;
+        currentOption.textContent = currentStatus;
+        currentOption.selected = true;
+        sel.appendChild(currentOption);
+      } else {
+        var empty = document.createElement("option");
+        empty.value = "";
+        empty.textContent = "No status options configured";
+        sel.appendChild(empty);
+      }
+      return;
+    }
+    choices.forEach(function (choice) {
+      var option = document.createElement("option");
+      option.value = choice.key;
+      option.textContent = choice.value;
+      if (currentStatus === choice.key) option.selected = true;
+      sel.appendChild(option);
+    });
+  }
+
   ims.bootstrapPage({ activeNav: "inventory", requireWrite: true }).then(function (boot) {
     if (!boot) return;
     if (!id) { ims.showToast("Missing id", "danger"); return; }
     Promise.all([
       ims.getCategoryTree(),
       ims.getChildTypeSchemas().catch(function () { return CHILD_TYPE_SCHEMA; }),
+      ims.getAttributeChoices().catch(function () { return {}; }),
       ims.api.get("/items/" + id + "/"),
     ]).then(function (res) {
       categoryTree = res[0] || [];
@@ -262,9 +241,9 @@
         sel.appendChild(o);
       });
 
-      itemData = res[2].data;
+      itemData = res[3].data;
+      populateStatusChoices(res[2] || {}, itemData.status);
       sel.value = itemData.category.id;
-      document.getElementById("fName").value = itemData.name || "";
       document.getElementById("fSpecs").value = itemData.specs || "";
       document.getElementById("fBrand").value = itemData.brand || "";
       document.getElementById("fCapVal").value = itemData.capacity_value != null ? itemData.capacity_value : "";
@@ -302,7 +281,6 @@
     var fd = new FormData(e.target);
     var payload = {
       category: parseInt(fd.get("category"), 10),
-      name: (fd.get("name") || "").trim(),
       specs: (fd.get("specs") || "").trim(),
       brand: (fd.get("brand") || "").trim() || null,
       capacity_value: fd.get("capacity_value") ? parseFloat(fd.get("capacity_value")) : null,

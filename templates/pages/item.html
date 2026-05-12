@@ -20,7 +20,6 @@
           </div>
           <div class="row g-2 small mt-1">
             <div class="col-md-3"><strong>Brand</strong><br /><span id="fBrand">—</span></div>
-            <div class="col-md-3"><strong>Name</strong><br /><span id="fName">—</span></div>
           </div>
         </div>
       </div>
@@ -94,7 +93,7 @@
       ims.api.get("/items/" + id + "/logs/?page_size=200"),
     ]).then(function (res) {
       var it = res[0].data;
-      var specs = (it.specs || it.name || it.brand || ims.formatCategoryLeaf(it.category) || "Inventory item").trim();
+      var specs = (it.specs || it.brand || ims.formatCategoryLeaf(it.category) || "Inventory item").trim();
       document.getElementById("itemImageWrap").innerHTML = ims.renderItemImage(it, "item-thumb-lg");
       document.getElementById("titleSpecs").textContent = specs;
       document.getElementById("titleCat").textContent = it.category ? ims.formatCategoryLeaf(it.category) : "—";
@@ -104,7 +103,6 @@
       document.getElementById("fUpd").textContent = it.last_updated ? new Date(it.last_updated).toLocaleString() : "—";
       document.getElementById("fRem").textContent = it.remark || "—";
       document.getElementById("fBrand").textContent = it.brand || "—";
-      document.getElementById("fName").textContent = it.name || "—";
       document.getElementById("fActNote").textContent = it.activity_note || "—";
 
       var child = it.child || {};

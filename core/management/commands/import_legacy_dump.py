@@ -1,4 +1,3 @@
-import json
 import re
 from pathlib import Path
 
@@ -392,4 +391,3 @@ class Command(BaseCommand):
         with connection.cursor() as cursor:
             for sql in sql_list:
                 cursor.execute(sql)
-
