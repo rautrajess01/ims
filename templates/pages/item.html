@@ -94,7 +94,52 @@
     ]).then(function (res) {
       var it = res[0].data;
       var specs = (it.specs || it.brand || ims.formatCategoryLeaf(it.category) || "Inventory item").trim();
-      document.getElementById("itemImageWrap").innerHTML = ims.renderItemImage(it, "item-thumb-lg");
+      var itemImageWrap = document.getElementById("itemImageWrap");
+      itemImageWrap.innerHTML = ims.renderItemImage(it, "item-thumb-lg");
+      itemImageWrap.addEventListener("click", function (event) {
+        var target = event.target;
+        var img = target.closest("[data-lightbox]");
+        if (!img) {
+          var thumb = target.closest(".item-thumb");
+          img = thumb ? thumb.querySelector("img") : null;
+        }
+        if (!img || !itemImageWrap.contains(img)) return;
+        event.preventDefault();
+
+        var overlay = document.createElement("div");
+        overlay.style.position = "fixed";
+        overlay.style.inset = "0";
+        overlay.style.zIndex = "2000";
+        overlay.style.display = "flex";
+        overlay.style.alignItems = "center";
+        overlay.style.justifyContent = "center";
+        overlay.style.background = "rgba(0, 0, 0, 0.85)";
+        overlay.style.cursor = "zoom-out";
+
+        var fullImage = document.createElement("img");
+        fullImage.src = img.currentSrc || img.src;
+        fullImage.alt = img.alt || "";
+        fullImage.style.maxWidth = "90vw";
+        fullImage.style.maxHeight = "90vh";
+        fullImage.style.objectFit = "contain";
+        fullImage.addEventListener("click", function (e) {
+          e.stopPropagation();
+        });
+
+        function closeLightbox() {
+          document.removeEventListener("keydown", onKeydown);
+          overlay.remove();
+        }
+
+        function onKeydown(e) {
+          if (e.key === "Escape") closeLightbox();
+        }
+
+        overlay.addEventListener("click", closeLightbox);
+        document.addEventListener("keydown", onKeydown);
+        overlay.appendChild(fullImage);
+        document.body.appendChild(overlay);
+      });
       document.getElementById("titleSpecs").textContent = specs;
       document.getElementById("titleCat").textContent = it.category ? ims.formatCategoryLeaf(it.category) : "—";
       document.getElementById("fCap").textContent = (it.capacity_display || "").trim() || "—";
@@ -177,3 +222,4 @@
 })();
 </script>
 {% endblock %}
+

@@ -282,7 +282,7 @@
     if (url) {
       return (
         '<span class="' + classes + '">' +
-        '<img src="' + escapeHtml(url) + '" alt="' + escapeHtml(label) + '" loading="lazy" data-lightbox style="cursor:zoom-in;" />' +
+        '<img src="' + escapeHtml(url) + '" alt="' + escapeHtml(label) + '" loading="lazy" />' +
         "</span>"
       );
     }
@@ -1053,4 +1053,3 @@
     USER_ROLE_KEY: USER_ROLE_KEY,
   };
 })();
-
