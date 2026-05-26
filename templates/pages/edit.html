@@ -15,11 +15,6 @@
           <label class="form-label">Category</label>
           <select class="form-select" name="category" required id="selCat"></select>
         </div>
-        <div id="categorySpecificFields" class="d-none mb-3">
-          <hr class="my-3" />
-          <h6 class="text-secondary mb-2">Category-specific fields</h6>
-          <div id="catChildFields"></div>
-        </div>
         <div class="mb-3">
           <label class="form-label">Specs</label>
           <input class="form-control" type="text" name="specs" id="fSpecs" required />
@@ -221,12 +216,10 @@
     if (!id) { ims.showToast("Missing id", "danger"); return; }
     Promise.all([
       ims.getCategoryTree(),
-      ims.getChildTypeSchemas().catch(function () { return CHILD_TYPE_SCHEMA; }),
       ims.getAttributeChoices().catch(function () { return {}; }),
       ims.api.get("/items/" + id + "/"),
     ]).then(function (res) {
       categoryTree = res[0] || [];
-      CHILD_TYPE_SCHEMA = res[1] || CHILD_TYPE_SCHEMA;
       var tree = categoryTree;
       var sel = document.getElementById("selCat");
       var leaves = ims.flattenCategoryTree(tree || []).filter(function (node) {
@@ -241,8 +234,8 @@
         sel.appendChild(o);
       });
 
-      itemData = res[3].data;
-      populateStatusChoices(res[2] || {}, itemData.status);
+      itemData = res[2].data;
+      populateStatusChoices(res[1] || {}, itemData.status);
       sel.value = itemData.category.id;
       document.getElementById("fSpecs").value = itemData.specs || "";
       document.getElementById("fBrand").value = itemData.brand || "";
@@ -261,15 +254,6 @@
         currentUrl: itemData.image || "",
       });
 
-      var existingChildData = itemData.child || {};
-      var currentChildType = getCategoryChildType(parseInt(sel.value, 10));
-      sel.addEventListener("change", function () {
-        var catId = parseInt(sel.value, 10);
-        var childType = getCategoryChildType(catId);
-        var vals = (childType === currentChildType) ? existingChildData : {};
-        renderCategoryChildFields(childType, vals);
-      });
-      renderCategoryChildFields(currentChildType, existingChildData);
     }).catch(function () {
       document.getElementById("selCat").innerHTML = '<option value="">Could not load categories</option>';
       ims.showToast("Could not load categories", "danger");

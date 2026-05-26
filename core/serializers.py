@@ -1,43 +1,20 @@
-import json
-
 from django.contrib.auth import get_user_model
-from django.core.exceptions import ObjectDoesNotExist
 from django.db import transaction
 from rest_framework import serializers
 from simple_history.utils import update_change_reason
 
-from .models import (
-    AttributeChoice,
-    CHILD_MODEL_REVERSE_NAMES,
-    CPUItem,
-    CableItem,
-    Category,
-    InventoryItem,
-    InventoryLog,
-    MiscItem,
-    RAMItem,
-    SFPItem,
-    StorageItem,
-    SwitchItem,
-)
+from .models import AttributeChoice, Category, InventoryItem, InventoryLog
 
-STORAGE_FIELDS = {"drive_type", "brand", "interface"}
-SFP_FIELDS = set()
-SWITCH_FIELDS = {"ports_1g", "ports_10g"}
-CABLE_FIELDS = {"cable_type", "length_m"}
-RAM_FIELDS = set()
-CPU_FIELDS = set()
-MISC_FIELDS = set()
-
-ATTRIBUTE_CHOICE_FIELD_MAP = {
-    ("storage", "drive_type"): "storage_drive_type",
-    ("storage", "brand"): "storage_brand",
-    ("storage", "interface"): "storage_interface",
-    ("cable", "cable_type"): "cable_type",
-}
-ATTRIBUTE_CHOICE_CATEGORIES = set(ATTRIBUTE_CHOICE_FIELD_MAP.values()) | {"status"}
 
 User = get_user_model()
+
+
+def get_user_role(user):
+    if user.is_superuser:
+        return "superuser"
+    if user.is_staff:
+        return "staff"
+    return "regular"
 
 
 def get_attribute_choice_map():
@@ -54,84 +31,23 @@ def get_active_choice_keys(category):
     )
 
 
-def get_user_role(user):
-    if user.is_superuser:
-        return "superuser"
-    if user.is_staff:
-        return "staff"
-    return "regular"
-
-
-def sync_child_model(item, child_data):
-    child_type = item.category.child_type
-    if not isinstance(child_data, dict):
-        child_data = {}
-    active = set()
-
-    if child_type == "storage":
-        defaults = {k: v for k, v in child_data.items() if k in STORAGE_FIELDS}
-        if STORAGE_FIELDS:
-            StorageItem.objects.update_or_create(
-                inventory_item=item,
-                defaults=defaults,
-            )
-            active.add("storage")
-    elif child_type == "sfp":
-        defaults = {k: v for k, v in child_data.items() if k in SFP_FIELDS}
-        if SFP_FIELDS:
-            SFPItem.objects.update_or_create(
-                inventory_item=item,
-                defaults=defaults,
-            )
-            active.add("sfp")
-    elif child_type == "switch":
-        defaults = {k: v for k, v in child_data.items() if k in SWITCH_FIELDS}
-        if SWITCH_FIELDS:
-            SwitchItem.objects.update_or_create(
-                inventory_item=item,
-                defaults=defaults,
-            )
-            active.add("switch")
-    elif child_type == "ram":
-        defaults = {k: v for k, v in child_data.items() if k in RAM_FIELDS}
-        if RAM_FIELDS:
-            RAMItem.objects.update_or_create(
-                inventory_item=item,
-                defaults=defaults,
-            )
-            active.add("ram")
-    elif child_type == "cpu":
-        defaults = {k: v for k, v in child_data.items() if k in CPU_FIELDS}
-        if CPU_FIELDS:
-            CPUItem.objects.update_or_create(
-                inventory_item=item,
-                defaults=defaults,
-            )
-            active.add("cpu")
-    elif child_type == "misc":
-        defaults = {k: v for k, v in child_data.items() if k in MISC_FIELDS}
-        if MISC_FIELDS:
-            MiscItem.objects.update_or_create(
-                inventory_item=item,
-                defaults=defaults,
-            )
-            active.add("misc")
-    elif child_type == "cable":
-        defaults = {k: v for k, v in child_data.items() if k in CABLE_FIELDS}
-        if CABLE_FIELDS:
-            CableItem.objects.update_or_create(
-                inventory_item=item,
-                defaults=defaults,
-            )
-            active.add("cable")
-
-    for attr in CHILD_MODEL_REVERSE_NAMES:
-        if attr not in active:
-            try:
-                child = getattr(item, attr)
-                child.delete()
-            except (AttributeError, ObjectDoesNotExist):
-                pass
+def get_child_type_schemas():
+    return {
+        "sfp": [{"name": "item_type", "label": "Type", "type": "string", "required": False}],
+        "storage": [
+            {"name": "item_type", "label": "Type", "type": "string", "required": False},
+            {"name": "interface", "label": "Interface", "type": "string", "required": False},
+        ],
+        "switch": [
+            {"name": "ports_1g", "label": "1G ports", "type": "integer", "required": False},
+            {"name": "ports_10g", "label": "10G ports", "type": "integer", "required": False},
+            {"name": "ports_other", "label": "Other ports", "type": "string", "required": False},
+        ],
+        "cable": [{"name": "cable_length_m", "label": "Length (m)", "type": "float", "required": False}],
+        "ram": [{"name": "item_type", "label": "Type", "type": "string", "required": False}],
+        "cpu": [{"name": "item_type", "label": "Type", "type": "string", "required": False}],
+        "misc": [{"name": "item_type", "label": "Type", "type": "string", "required": False}],
+    }
 
 
 class UserBriefSerializer(serializers.ModelSerializer):
@@ -239,8 +155,9 @@ class AdminUserSerializer(serializers.ModelSerializer):
 
 
 class CategorySerializer(serializers.ModelSerializer):
-    parent = serializers.PrimaryKeyRelatedField(queryset=Category.objects.all(), allow_null=True, required=False)
+    parent = serializers.SerializerMethodField()
     parent_name = serializers.SerializerMethodField()
+    child_type = serializers.SerializerMethodField()
     full_name = serializers.ReadOnlyField()
     depth = serializers.ReadOnlyField()
     is_leaf = serializers.ReadOnlyField()
@@ -248,161 +165,29 @@ class CategorySerializer(serializers.ModelSerializer):
     class Meta:
         model = Category
         fields = ("id", "name", "parent", "parent_name", "description", "child_type", "full_name", "depth", "is_leaf")
-        validators = []
 
-    def validate_parent(self, value):
-        instance = getattr(self, "instance", None)
-        if instance is None or value is None:
-            return value
-        if value.pk == instance.pk:
-            raise serializers.ValidationError("A category cannot be its own parent.")
-        node = value
-        while node is not None:
-            if node.pk == instance.pk:
-                raise serializers.ValidationError("Circular parent relationship is not allowed.")
-            node = node.parent
-        return value
+    def get_parent(self, obj):
+        return None
 
     def get_parent_name(self, obj):
-        return obj.parent.name if obj.parent else None
+        return None
 
-    def validate(self, attrs):
-        attrs = super().validate(attrs)
-        instance = getattr(self, "instance", None)
-        parent = attrs.get("parent", getattr(instance, "parent", None))
-
-        depth = 1
-        node = parent
-        while node is not None:
-            depth += 1
-            node = node.parent
-        if depth > Category.MAX_DEPTH:
-            raise serializers.ValidationError(
-                {"parent": f"Category hierarchy cannot exceed {Category.MAX_DEPTH} levels."}
-            )
-        if parent is not None and parent.items.exists():
-            raise serializers.ValidationError(
-                {"parent": "Cannot add a child under a category that already has items assigned."}
-            )
-        sibling_qs = Category.objects.filter(name=attrs.get("name", getattr(instance, "name", None)))
-        if parent is None:
-            sibling_qs = sibling_qs.filter(parent__isnull=True)
-        else:
-            sibling_qs = sibling_qs.filter(parent=parent)
-        if instance is not None:
-            sibling_qs = sibling_qs.exclude(pk=instance.pk)
-        if sibling_qs.exists():
-            raise serializers.ValidationError({"name": "A category with this name already exists at this level."})
-        if instance is not None and instance.items.exists() and instance.children.exists():
-            raise serializers.ValidationError(
-                "A category with assigned items cannot become or remain a parent category."
-            )
-        return attrs
+    def get_child_type(self, obj):
+        return ""
 
 
-class CategoryTreeSerializer(serializers.ModelSerializer):
-    parent = serializers.PrimaryKeyRelatedField(read_only=True)
-    full_name = serializers.ReadOnlyField()
-    depth = serializers.ReadOnlyField()
-    is_leaf = serializers.ReadOnlyField()
+class CategoryTreeSerializer(CategorySerializer):
     item_count = serializers.SerializerMethodField()
     children = serializers.SerializerMethodField()
 
-    class Meta:
-        model = Category
-        fields = (
-            "id", "name", "parent", "description", "child_type",
-            "full_name", "depth", "is_leaf", "item_count", "children",
-        )
+    class Meta(CategorySerializer.Meta):
+        fields = CategorySerializer.Meta.fields + ("item_count", "children")
 
     def get_item_count(self, obj):
-        return obj.items.count() if not obj.children.exists() else 0
+        return obj.items.count()
 
     def get_children(self, obj):
-        return CategoryTreeSerializer(obj.children.all(), many=True).data
-
-
-class SFPItemSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = SFPItem
-        fields = ()
-
-
-class StorageItemSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = StorageItem
-        fields = ("drive_type", "brand", "interface")
-
-
-class SwitchItemSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = SwitchItem
-        fields = ("ports_1g", "ports_10g")
-
-
-class CableItemSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = CableItem
-        fields = ("cable_type", "length_m")
-
-
-class RAMItemSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = RAMItem
-        fields = ()
-
-
-class CPUItemSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = CPUItem
-        fields = ()
-
-
-class MiscItemSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = MiscItem
-        fields = ()
-
-
-CHILD_SERIALIZER_MAP = {
-    "sfp": SFPItemSerializer,
-    "storage": StorageItemSerializer,
-    "switch": SwitchItemSerializer,
-    "cable": CableItemSerializer,
-    "ram": RAMItemSerializer,
-    "cpu": CPUItemSerializer,
-    "misc": MiscItemSerializer,
-}
-
-
-def get_child_type_schemas():
-    attribute_choices = get_attribute_choice_map()
-    schemas = {}
-    for child_type, serializer_class in CHILD_SERIALIZER_MAP.items():
-        model = serializer_class.Meta.model
-        fields = []
-        for field_name in serializer_class.Meta.fields:
-            model_field = model._meta.get_field(field_name)
-            field_type = "string"
-            if model_field.get_internal_type() in {"PositiveIntegerField", "IntegerField"}:
-                field_type = "integer"
-            elif model_field.get_internal_type() in {"FloatField", "DecimalField"}:
-                field_type = "float"
-            elif model_field.get_internal_type() == "BooleanField":
-                field_type = "boolean"
-            choice_category = ATTRIBUTE_CHOICE_FIELD_MAP.get((child_type, field_name))
-            choices = attribute_choices.get(choice_category, []) if choice_category else []
-            fields.append(
-                {
-                    "name": field_name,
-                    "label": model_field.verbose_name.title(),
-                    "type": "choice" if choice_category else field_type,
-                    "choices": choices,
-                    "required": not model_field.blank and not model_field.null,
-                }
-            )
-        schemas[child_type] = fields
-    return schemas
+        return []
 
 
 class AttributeChoiceSerializer(serializers.ModelSerializer):
@@ -413,6 +198,8 @@ class AttributeChoiceSerializer(serializers.ModelSerializer):
 
 class InventoryItemSerializer(serializers.ModelSerializer):
     category = CategorySerializer(read_only=True)
+    specs = serializers.CharField(source="name", read_only=True)
+    last_updated = serializers.DateTimeField(source="updated_at", read_only=True)
     display_name = serializers.ReadOnlyField()
     capacity_display = serializers.SerializerMethodField()
     child = serializers.SerializerMethodField()
@@ -420,123 +207,86 @@ class InventoryItemSerializer(serializers.ModelSerializer):
     class Meta:
         model = InventoryItem
         fields = (
-            "id", "category", "display_name", "specs", "brand",
-            "capacity_value", "capacity_unit", "capacity_display",
-            "quantity", "status", "remark", "activity_note",
-            "image", "child", "last_updated", "created_at",
+            "id", "category", "display_name", "specs", "name", "brand",
+            "item_type", "capacity_value", "capacity_unit", "capacity_display",
+            "interface", "ports_1g", "ports_10g", "ports_25g", "ports_40g",
+            "ports_100g", "ports_other", "cable_length_m", "quantity", "status",
+            "remark", "activity_note", "image", "child", "last_updated", "updated_at",
+            "created_at",
         )
 
     def get_capacity_display(self, obj):
         if obj.capacity_value is not None:
             unit = f" {obj.capacity_unit}" if obj.capacity_unit else ""
-            return f"{obj.capacity_value}{unit}"
+            return f"{obj.capacity_value:g}{unit}"
         return ""
 
     def get_child(self, obj):
-        child = obj.get_child()
-        if child is None:
-            return None
-        for attr, ser_cls in CHILD_SERIALIZER_MAP.items():
-            if hasattr(obj, attr):
-                try:
-                    related = getattr(obj, attr)
-                    if related.pk:
-                        return ser_cls(related).data
-                except ObjectDoesNotExist:
-                    continue
-        return None
+        data = {}
+        for field in (
+            "item_type", "interface", "ports_1g", "ports_10g", "ports_25g",
+            "ports_40g", "ports_100g", "ports_other", "cable_length_m",
+        ):
+            value = getattr(obj, field)
+            if value not in (None, ""):
+                data[field] = value
+        return data or None
 
 
 class InventoryItemWriteSerializer(serializers.ModelSerializer):
+    specs = serializers.CharField(write_only=True, required=False, allow_blank=True)
     log_note = serializers.CharField(write_only=True, required=False, allow_blank=True)
-    specs = serializers.CharField(required=True, allow_blank=False)
     child_data = serializers.JSONField(write_only=True, required=False, default=dict)
     image_clear = serializers.BooleanField(write_only=True, required=False, default=False)
 
     class Meta:
         model = InventoryItem
         fields = (
-            "id", "category", "specs", "brand",
-            "capacity_value", "capacity_unit",
-            "quantity", "status", "remark", "activity_note",
-            "image", "image_clear", "log_note", "child_data",
+            "id", "category", "name", "specs", "brand", "item_type",
+            "capacity_value", "capacity_unit", "interface", "ports_1g", "ports_10g",
+            "ports_25g", "ports_40g", "ports_100g", "ports_other", "cable_length_m",
+            "quantity", "status", "remark", "activity_note", "image", "image_clear",
+            "log_note", "child_data",
         )
         read_only_fields = ("id",)
+        extra_kwargs = {"name": {"required": False, "allow_blank": True}}
 
     def validate(self, attrs):
         instance = getattr(self, "instance", None)
-        if instance is None:
-            category = attrs.get("category")
-        else:
-            category = attrs.get("category", instance.category)
-        attrs["specs"] = (attrs.get("specs") if "specs" in attrs else (instance.specs if instance is not None else "")).strip()
-        if not attrs["specs"]:
+        legacy_name = attrs.pop("specs", None)
+        if legacy_name is not None:
+            attrs["name"] = legacy_name
+        name = (attrs.get("name") if "name" in attrs else (instance.name if instance else "")).strip()
+        if not name:
             raise serializers.ValidationError({"specs": "This field is required."})
-        if category is not None and category.children.exists():
-            raise serializers.ValidationError(
-                {"category": "Inventory items can only be assigned to leaf categories."}
-            )
+        attrs["name"] = name
+
+        child_data = attrs.pop("child_data", {}) or {}
+        if isinstance(child_data, dict):
+            for field in (
+                "item_type", "interface", "ports_1g", "ports_10g", "ports_25g",
+                "ports_40g", "ports_100g", "ports_other", "cable_length_m",
+            ):
+                if field in child_data and field not in attrs:
+                    attrs[field] = child_data[field]
+
         status_value = attrs.get("status", instance.status if instance is not None else None)
         quantity_value = attrs.get("quantity", instance.quantity if instance is not None else 0)
         if quantity_value == 0:
             status_value = InventoryItem.Status.OUT_OF_STOCK
+            attrs["status"] = status_value
         if not status_value:
             raise serializers.ValidationError({"status": "This field is required."})
         valid_statuses = get_active_choice_keys("status")
-        if not valid_statuses:
-            raise serializers.ValidationError({"status": "Add status choices before saving inventory items."})
-        if status_value not in valid_statuses:
+        if valid_statuses and status_value not in valid_statuses:
             raise serializers.ValidationError({"status": "Select a configured status choice."})
-        child_data = attrs.get("child_data")
-        if isinstance(child_data, str):
-            try:
-                child_data = json.loads(child_data) if child_data else {}
-            except json.JSONDecodeError:
-                raise serializers.ValidationError({"child_data": "Expected valid JSON for category-specific fields."})
-            attrs["child_data"] = child_data
-        if child_data is not None:
-            if not isinstance(child_data, dict):
-                raise serializers.ValidationError({"child_data": "Expected an object of category-specific fields."})
-            child_type = category.child_type if category is not None else ""
-            serializer_class = CHILD_SERIALIZER_MAP.get(child_type)
-            if child_data and not serializer_class:
-                raise serializers.ValidationError(
-                    {"child_data": "This category does not accept category-specific fields."}
-                )
-            if serializer_class:
-                allowed_fields = set(serializer_class.Meta.fields)
-                unknown_fields = sorted(set(child_data) - allowed_fields)
-                if unknown_fields:
-                    raise serializers.ValidationError(
-                        {"child_data": f"Unknown field(s) for this category: {', '.join(unknown_fields)}."}
-                    )
-                for field_name, choice_category in ATTRIBUTE_CHOICE_FIELD_MAP.items():
-                    child_type_name, child_field_name = field_name
-                    if child_type_name != child_type or child_field_name not in child_data:
-                        continue
-                    valid_choices = get_active_choice_keys(choice_category)
-                    if not valid_choices:
-                        raise serializers.ValidationError(
-                            {"child_data": f"Add choices for {child_field_name.replace('_', ' ')} before saving."}
-                        )
-                    if child_data[child_field_name] not in valid_choices:
-                        raise serializers.ValidationError(
-                            {"child_data": f"Select a configured choice for {child_field_name.replace('_', ' ')}."}
-                        )
-                child_serializer = serializer_class(data=child_data, partial=True)
-                child_serializer.is_valid(raise_exception=True)
-                attrs["child_data"] = child_serializer.validated_data
         return attrs
 
     def create(self, validated_data):
         user = self.context["request"].user
         log_note = (validated_data.pop("log_note", "") or "").strip()
-        child_data = validated_data.pop("child_data", {})
         validated_data.pop("image_clear", None)
-        if validated_data.get("quantity", 0) == 0:
-            validated_data["status"] = InventoryItem.Status.OUT_OF_STOCK
         item = InventoryItem.objects.create(**validated_data)
-        sync_child_model(item, child_data)
         change_reason = log_note or "Added item"
         update_change_reason(item, change_reason)
         InventoryLog.objects.create(
@@ -547,13 +297,13 @@ class InventoryItemWriteSerializer(serializers.ModelSerializer):
             deployed_to="",
             notes=change_reason,
             performed_by=user,
+            timestamp=item.created_at,
         )
         return item
 
     def update(self, instance, validated_data):
         user = self.context["request"].user
         log_note = (validated_data.pop("log_note", "") or "").strip()
-        child_data = validated_data.pop("child_data", {})
         image_clear = validated_data.pop("image_clear", False)
         old_qty = instance.quantity
         old_status = instance.status
@@ -563,127 +313,116 @@ class InventoryItemWriteSerializer(serializers.ModelSerializer):
             setattr(instance, attr, val)
         if image_clear:
             instance.image = None
-
         if instance.quantity == 0:
             instance.status = InventoryItem.Status.OUT_OF_STOCK
+        from django.utils import timezone
 
+        instance.updated_at = timezone.now()
         instance.save()
-        sync_child_model(instance, child_data)
-
-        new_qty = instance.quantity
-        new_status = instance.status
-        new_remark = instance.remark or ""
 
         logs = []
-        change_fragments = []
+        reasons = []
+        if old_status == InventoryItem.Status.DEPLOYED and instance.status != InventoryItem.Status.DEPLOYED:
+            reasons.append("Returned")
+            logs.append(InventoryLog(action=InventoryLog.Action.RETURNED, notes=log_note or "Returned item"))
+        if instance.status == InventoryItem.Status.DEPLOYED and old_status != InventoryItem.Status.DEPLOYED:
+            reasons.append("Deployed")
+            logs.append(InventoryLog(action=InventoryLog.Action.DEPLOYED, notes=log_note or "Deployed item"))
+        if instance.status == InventoryItem.Status.FAULTY and old_status != InventoryItem.Status.FAULTY:
+            reasons.append("Marked faulty")
+            logs.append(InventoryLog(action=InventoryLog.Action.FAULTY, notes=log_note or "Marked item as faulty"))
+        if old_qty != instance.quantity:
+            reasons.append("Quantity updated")
+            logs.append(InventoryLog(action=InventoryLog.Action.QTY_CHANGED, notes=log_note or "Quantity updated"))
+        if old_remark != (instance.remark or ""):
+            reasons.append("Remark updated")
+            logs.append(InventoryLog(action=InventoryLog.Action.REMARK_UPDATED, notes=log_note or "Remark updated"))
+        if old_status != instance.status:
+            reasons.append("Status updated")
+            logs.append(InventoryLog(action=InventoryLog.Action.STATUS_CHANGED, notes=log_note or "Status updated"))
 
-        if old_status == InventoryItem.Status.DEPLOYED and new_status != InventoryItem.Status.DEPLOYED:
-            change_fragments.append("Returned")
-            logs.append(
-                InventoryLog(
-                    item=instance,
-                    action=InventoryLog.Action.RETURNED,
-                    quantity_before=old_qty,
-                    quantity_after=new_qty,
-                    deployed_to="",
-                    notes=log_note or "Returned item",
-                    performed_by=user,
-                )
-            )
+        reason = log_note or ", ".join(dict.fromkeys(reasons)) or "Updated item"
+        update_change_reason(instance, reason)
 
-        if new_status == InventoryItem.Status.DEPLOYED and old_status != InventoryItem.Status.DEPLOYED:
-            change_fragments.append("Deployed")
-            logs.append(
-                InventoryLog(
-                    item=instance,
-                    action=InventoryLog.Action.DEPLOYED,
-                    quantity_before=old_qty,
-                    quantity_after=new_qty,
-                    deployed_to="",
-                    notes=log_note or "Deployed item",
-                    performed_by=user,
-                )
-            )
-
-        if new_status == InventoryItem.Status.FAULTY and old_status != InventoryItem.Status.FAULTY:
-            change_fragments.append("Marked faulty")
-            logs.append(
-                InventoryLog(
-                    item=instance,
-                    action=InventoryLog.Action.FAULTY,
-                    quantity_before=old_qty,
-                    quantity_after=new_qty,
-                    deployed_to="",
-                    notes=log_note or "Marked item as faulty",
-                    performed_by=user,
-                )
-            )
-
-        if new_status != old_status and new_status not in (
-            InventoryItem.Status.DEPLOYED,
-            InventoryItem.Status.FAULTY,
-        ) and old_status != InventoryItem.Status.DEPLOYED:
-            change_fragments.append("Status changed")
-            logs.append(
-                InventoryLog(
-                    item=instance,
-                    action=InventoryLog.Action.STATUS_CHANGED,
-                    quantity_before=old_qty,
-                    quantity_after=new_qty,
-                    deployed_to="",
-                    notes=log_note or "Status updated",
-                    performed_by=user,
-                )
-            )
-
-        if new_qty != old_qty:
-            change_fragments.append("Quantity changed")
-            logs.append(
-                InventoryLog(
-                    item=instance,
-                    action=InventoryLog.Action.QTY_CHANGED,
-                    quantity_before=old_qty,
-                    quantity_after=new_qty,
-                    deployed_to="",
-                    notes=log_note or "Quantity updated",
-                    performed_by=user,
-                )
-            )
-
-        if new_remark != old_remark:
-            change_fragments.append("Remark updated")
-            logs.append(
-                InventoryLog(
-                    item=instance,
-                    action=InventoryLog.Action.REMARK_UPDATED,
-                    quantity_before=new_qty,
-                    quantity_after=new_qty,
-                    deployed_to="",
-                    notes=log_note or "Remark updated",
-                    performed_by=user,
-                )
-            )
-
-        if log_note or change_fragments:
-            update_change_reason(instance, log_note or ", ".join(change_fragments))
-
+        for log in logs:
+            log.item = instance
+            log.quantity_before = old_qty
+            log.quantity_after = instance.quantity
+            log.deployed_to = ""
+            log.performed_by = user
+            log.timestamp = instance.updated_at
         if logs:
             InventoryLog.objects.bulk_create(logs)
-
         return instance
 
 
-class InventoryLogItemBriefSerializer(serializers.ModelSerializer):
-    category = CategorySerializer(read_only=True)
-    display_name = serializers.ReadOnlyField()
+class InventoryAdjustSerializer(serializers.Serializer):
+    action = serializers.ChoiceField(choices=["stock_in", "stock_out", "deploy", "return", "mark_faulty"])
+    quantity = serializers.IntegerField(min_value=0, required=False, default=0)
+    deployed_to = serializers.CharField(required=False, allow_blank=True)
+    notes = serializers.CharField(required=False, allow_blank=True)
 
-    class Meta:
-        model = InventoryItem
-        fields = ("id", "display_name", "category", "status", "quantity")
+    def validate(self, attrs):
+        action = attrs["action"]
+        qty = attrs.get("quantity", 0)
+        if action in {"stock_in", "stock_out", "deploy", "return"} and qty <= 0:
+            raise serializers.ValidationError({"quantity": "Quantity must be greater than zero."})
+        item = self.context["item"]
+        if action in {"stock_out", "deploy"} and qty > item.quantity:
+            raise serializers.ValidationError({"quantity": "Quantity exceeds current stock."})
+        return attrs
+
+    @transaction.atomic
+    def save(self):
+        item = self.context["item"]
+        request = self.context["request"]
+        action = self.validated_data["action"]
+        qty = self.validated_data.get("quantity", 0)
+        notes = self.validated_data.get("notes", "")
+        deployed_to = self.validated_data.get("deployed_to", "")
+        before = item.quantity
+
+        if action == "stock_in":
+            item.quantity += qty
+            item.status = InventoryItem.Status.IN_STOCK
+            log_action = InventoryLog.Action.QTY_CHANGED
+        elif action == "stock_out":
+            item.quantity -= qty
+            log_action = InventoryLog.Action.QTY_CHANGED
+        elif action == "deploy":
+            item.quantity -= qty
+            item.status = InventoryItem.Status.DEPLOYED
+            log_action = InventoryLog.Action.DEPLOYED
+        elif action == "return":
+            item.quantity += qty
+            item.status = InventoryItem.Status.IN_STOCK
+            log_action = InventoryLog.Action.RETURNED
+        else:
+            item.status = InventoryItem.Status.FAULTY
+            log_action = InventoryLog.Action.FAULTY
+
+        if item.quantity == 0 and item.status != InventoryItem.Status.FAULTY:
+            item.status = InventoryItem.Status.OUT_OF_STOCK
+        from django.utils import timezone
+
+        item.updated_at = timezone.now()
+        item.save()
+        update_change_reason(item, notes or log_action.label)
+        InventoryLog.objects.create(
+            item=item,
+            action=log_action,
+            quantity_before=before,
+            quantity_after=item.quantity,
+            deployed_to=deployed_to,
+            notes=notes,
+            performed_by=request.user,
+            timestamp=item.updated_at,
+        )
+        return item
 
 
 class InventoryLogSerializer(serializers.ModelSerializer):
-    item = InventoryLogItemBriefSerializer(read_only=True, allow_null=True)
+    item = InventoryItemSerializer(read_only=True)
     performed_by = UserBriefSerializer(read_only=True)
 
     class Meta:
@@ -698,124 +437,32 @@ class InventoryLogWriteSerializer(serializers.ModelSerializer):
     class Meta:
         model = InventoryLog
         fields = (
-            "item", "action", "quantity_before", "quantity_after",
-            "deployed_to", "notes",
+            "id", "item", "action", "quantity_before", "quantity_after",
+            "deployed_to", "notes", "performed_by", "timestamp",
         )
-
-    def create(self, validated_data):
-        validated_data["performed_by"] = self.context["request"].user
-        return super().create(validated_data)
-
-
-class InventoryAdjustSerializer(serializers.Serializer):
-    STOCK_IN = "stock_in"
-    STOCK_OUT = "stock_out"
-    DEPLOY = "deploy"
-    RETURN = "return"
-    MARK_FAULTY = "mark_faulty"
-
-    action = serializers.ChoiceField(
-        choices=(
-            (STOCK_IN, "Stock in"),
-            (STOCK_OUT, "Stock out"),
-            (DEPLOY, "Deploy"),
-            (RETURN, "Return"),
-            (MARK_FAULTY, "Mark faulty"),
-        )
-    )
-    quantity = serializers.IntegerField(min_value=1)
-    deployed_to = serializers.CharField(required=False, allow_blank=True, max_length=255)
-    notes = serializers.CharField(required=False, allow_blank=True)
-
-    def validate(self, attrs):
-        attrs = super().validate(attrs)
-        item = self.context["item"]
-        action = attrs["action"]
-        qty = attrs["quantity"]
-
-        if action in {self.STOCK_OUT, self.DEPLOY} and item.quantity < qty:
-            raise serializers.ValidationError({"quantity": f"Only {item.quantity} available in stock."})
-
-        if action in {self.DEPLOY, self.RETURN}:
-            deployed_to = (attrs.get("deployed_to") or "").strip()
-            if not deployed_to:
-                raise serializers.ValidationError({"deployed_to": "This field is required for deploy/return actions."})
-            attrs["deployed_to"] = deployed_to
-
-        attrs["notes"] = (attrs.get("notes") or "").strip()
-        return attrs
-
-    @transaction.atomic
-    def save(self, **kwargs):
-        request = self.context["request"]
-        item = self.context["item"]
-        item = InventoryItem.objects.select_for_update().select_related("category").get(pk=item.pk)
-
-        action = self.validated_data["action"]
-        qty = self.validated_data["quantity"]
-        deployed_to = self.validated_data.get("deployed_to", "")
-        notes = self.validated_data.get("notes", "")
-
-        old_qty = item.quantity
-        old_status = item.status
-
-        if action == self.STOCK_IN:
-            item.quantity = old_qty + qty
-            item.status = InventoryItem.Status.IN_STOCK
-            log_action = InventoryLog.Action.ADDED
-            reason = notes or f"Stocked in (+{qty})"
-        elif action == self.STOCK_OUT:
-            item.quantity = old_qty - qty
-            log_action = InventoryLog.Action.REMOVED
-            reason = notes or f"Stocked out (-{qty})"
-        elif action == self.DEPLOY:
-            item.quantity = old_qty - qty
-            item.status = InventoryItem.Status.DEPLOYED
-            log_action = InventoryLog.Action.DEPLOYED
-            reason = notes or f"Deployed (-{qty}) to {deployed_to}"
-        elif action == self.RETURN:
-            item.quantity = old_qty + qty
-            item.status = InventoryItem.Status.IN_STOCK
-            log_action = InventoryLog.Action.RETURNED
-            reason = notes or f"Returned (+{qty}) from {deployed_to}"
-        else:
-            item.status = InventoryItem.Status.FAULTY
-            log_action = InventoryLog.Action.FAULTY
-            reason = notes or "Marked as faulty"
-
-        if item.quantity == 0:
-            item.status = InventoryItem.Status.OUT_OF_STOCK
-
-        item.save()
-        update_change_reason(item, reason)
-
-        InventoryLog.objects.create(
-            item=item,
-            action=log_action,
-            quantity_before=old_qty,
-            quantity_after=item.quantity,
-            deployed_to=deployed_to if log_action in {InventoryLog.Action.DEPLOYED, InventoryLog.Action.RETURNED} else "",
-            notes=reason,
-            performed_by=request.user,
-        )
-
-        if action == self.STOCK_OUT and old_status != item.status and not notes:
-            update_change_reason(item, f"Stock out (-{qty})")
-
-        return item
+        read_only_fields = ("id",)
 
 
 class HistorySerializer(serializers.ModelSerializer):
+    specs = serializers.CharField(source="name", read_only=True)
+    last_updated = serializers.DateTimeField(source="updated_at", read_only=True)
+    history_user = UserBriefSerializer(read_only=True)
+
     class Meta:
         model = InventoryItem.history.model
-        fields = "__all__"
+        fields = (
+            "id", "specs", "name", "brand", "item_type", "capacity_value",
+            "capacity_unit", "quantity", "status", "remark", "activity_note",
+            "image", "last_updated", "updated_at", "created_at", "history_id",
+            "history_date", "history_change_reason", "history_type", "history_user",
+        )
 
 
 class DashboardSerializer(serializers.Serializer):
-    count_by_category = serializers.DictField(child=serializers.IntegerField())
-    count_by_parent_category = serializers.DictField(child=serializers.IntegerField())
+    count_by_category = serializers.DictField()
+    count_by_parent_category = serializers.DictField()
     category_totals = serializers.ListField()
-    count_by_status = serializers.DictField(child=serializers.IntegerField())
+    count_by_status = serializers.DictField()
     recent_updated_count = serializers.IntegerField()
     low_stock_count = serializers.IntegerField()
     total_items = serializers.IntegerField()

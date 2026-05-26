@@ -1,0 +1,93 @@
+[
+  {
+    "id": 2,
+    "password": "pbkdf2_sha256$1000000$02LuERKdcwlTkSEn4zScFX$YHJU+h/KcBCab4YEWhlxl4kcmpx2ptq/pTKv5iJ3D2Y=",
+    "last_login": null,
+    "is_superuser": true,
+    "username": "system",
+    "first_name": "Subisu",
+    "last_name": "System",
+    "email": "system@subisu.net.np",
+    "is_staff": true,
+    "is_active": true,
+    "date_joined": "2026-05-06 03:13:03.53191+00"
+  },
+  {
+    "id": 3,
+    "password": "pbkdf2_sha256$1000000$0faftD9fNtoIAwiqXQC6ac$15TatH5NV8AOiNAl+pjT3nfRu1EeXYxRvgSV36FHCEw=",
+    "last_login": null,
+    "is_superuser": true,
+    "username": "ykrishna",
+    "first_name": "Krishna",
+    "last_name": "Yadav",
+    "email": "krishna.yadav@subisu.net.np",
+    "is_staff": true,
+    "is_active": true,
+    "date_joined": "2026-05-06 05:53:56.939953+00"
+  },
+  {
+    "id": 1,
+    "password": "pbkdf2_sha256$1000000$RO7PBPGbKGx4tawpdAFbDi$j3WCXVsW7ZRY1ptKdNImpc6j4vuNJgJvfD9+xAB62CQ=",
+    "last_login": "2026-05-06 06:41:09.151456+00",
+    "is_superuser": true,
+    "username": "rrajesh",
+    "first_name": "Rajesh",
+    "last_name": "Raut",
+    "email": "rajesh.raut@subisu.net.np",
+    "is_staff": true,
+    "is_active": true,
+    "date_joined": "2026-05-05 17:46:24.148839+00"
+  },
+  {
+    "id": 5,
+    "password": "pbkdf2_sha256$1000000$QJBOtTzUx8layQWtRwXhLt$BNplMJidblNURpMgLeJ2ERtm0fbr1NiT2cOGadZY+OU=",
+    "last_login": null,
+    "is_superuser": true,
+    "username": "rruman",
+    "first_name": "Ruman",
+    "last_name": "Maharjan",
+    "email": "ruman.maharjan@subisu.net.np",
+    "is_staff": true,
+    "is_active": true,
+    "date_joined": "2026-05-06 10:33:42.451993+00"
+  },
+  {
+    "id": 6,
+    "password": "pbkdf2_sha256$1000000$GbGmJYLujpCQB6QKFdFpoZ$90XSxhfcWXrBi4oY9TFHv6DiVOD0yUwe1ljBq3VHeQ4=",
+    "last_login": null,
+    "is_superuser": true,
+    "username": "sanand",
+    "first_name": "Anand",
+    "last_name": "Shrestha",
+    "email": "anand.shrestha@subisu.net.np",
+    "is_staff": true,
+    "is_active": true,
+    "date_joined": "2026-05-06 10:34:26.456063+00"
+  },
+  {
+    "id": 7,
+    "password": "pbkdf2_sha256$1000000$ZDxddcftDptC0XePMCmxpt$lI3IOaZMwp5UVjb/hS74b8yGiPYfH5tLyInZDqz54mQ=",
+    "last_login": null,
+    "is_superuser": true,
+    "username": "rajesh",
+    "first_name": "",
+    "last_name": "",
+    "email": "raejsh@subisu.net.np",
+    "is_staff": true,
+    "is_active": false,
+    "date_joined": "2026-05-12 07:15:57.819267+00"
+  },
+  {
+    "id": 4,
+    "password": "pbkdf2_sha256$1000000$08rQPTPVjJGhsrM5DPfIxe$EIxRcCVQaEPjvWGCVVwgc3+TCOEEwgVgpkgJaDNbOXQ=",
+    "last_login": null,
+    "is_superuser": true,
+    "username": "rpuspa",
+    "first_name": "Pusparaj",
+    "last_name": "Raut",
+    "email": "pusparaj.raut@subisu.net.np",
+    "is_staff": true,
+    "is_active": true,
+    "date_joined": "2026-05-06 07:58:33.960284+00"
+  }
+]

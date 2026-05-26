@@ -7,12 +7,9 @@
   const CURRENT_USER_KEY = "ims_current_user";
   const FLASH_TOAST_KEY = "ims_flash_toast";
   const SIDEBAR_COLLAPSED_KEY = "sidebarCollapsed";
-  const SIDEBAR_COLLAPSED_LEGACY_KEY = "ims_sidebar_collapsed";
-  const SIDEBAR_TREE_KEY = "ims_sidebar_tree_open";
 
   const raw = axios.create({ baseURL: API_BASE });
   let categoryTreePromise = null;
-  let childTypeSchemasPromise = null;
   let attributeChoicesPromise = null;
   let inventoryItemsPromise = null;
   let currentUserPromise = null;
@@ -239,11 +236,6 @@
     return match;
   }
 
-  function getCategoryCustomFields(nodes, categoryId) {
-    var category = findCategoryById(nodes, categoryId);
-    return (category && category.custom_fields) || [];
-  }
-
   function formatCategoryPath(category) {
     if (!category) return "—";
     var path = category.full_name || category.fullName || "";
@@ -282,7 +274,7 @@
     if (url) {
       return (
         '<span class="' + classes + '">' +
-        '<img src="' + escapeHtml(url) + '" alt="' + escapeHtml(label) + '" loading="lazy" data-lightbox style="cursor:zoom-in;" />' +
+        '<img src="' + escapeHtml(url) + '" alt="' + escapeHtml(label) + '" loading="lazy" decoding="async" data-lightbox />' +
         "</span>"
       );
     }
@@ -381,121 +373,32 @@
     setPreview(currentUrl);
   }
 
-  function formatCustomFieldValue(field, customValues) {
-    if (!field) return "—";
-    customValues = customValues || {};
-    var value = customValues[field.name];
-    if (value === undefined || value === null || value === "") return "—";
-    if (field.type === "boolean") value = value ? "Yes" : "No";
-    if (field.unit) return value + " " + field.unit;
-    return String(value);
-  }
+  function openLightbox(src, alt) {
+    if (!src) return;
+    var overlay = document.createElement("div");
+    overlay.className = "image-lightbox";
 
-  function renderCustomFieldInputs(container, schema, values) {
-    if (!container) return;
-    schema = schema || [];
-    values = values || {};
-    container.innerHTML = "";
-    if (!schema.length) {
-      container.classList.add("d-none");
-      return;
+    var fullImage = document.createElement("img");
+    fullImage.src = src;
+    fullImage.alt = alt || "";
+    fullImage.decoding = "async";
+
+    function closeLightbox() {
+      document.removeEventListener("keydown", onKeydown);
+      overlay.remove();
     }
-    container.classList.remove("d-none");
 
-    schema.forEach(function (field) {
-      var wrapper = document.createElement("div");
-      wrapper.className = "mb-3";
+    function onKeydown(e) {
+      if (e.key === "Escape") closeLightbox();
+    }
 
-      var label = document.createElement("label");
-      label.className = "form-label";
-      label.textContent = field.label || field.name;
-      if (field.required) label.textContent += " *";
-      wrapper.appendChild(label);
-
-      var input;
-      if (field.type === "choice" || field.type === "boolean") {
-        input = document.createElement("select");
-        input.className = "form-select";
-        var empty = document.createElement("option");
-        empty.value = "";
-        empty.textContent = field.required ? "Select an option" : "Optional";
-        input.appendChild(empty);
-        if (field.type === "choice") {
-          (field.choices || []).forEach(function (choice) {
-            var option = document.createElement("option");
-            option.value = choice;
-            option.textContent = choice;
-            input.appendChild(option);
-          });
-        } else {
-          [{ value: "true", label: "Yes" }, { value: "false", label: "No" }].forEach(function (choice) {
-            var option = document.createElement("option");
-            option.value = choice.value;
-            option.textContent = choice.label;
-            input.appendChild(option);
-          });
-        }
-      } else {
-        input = document.createElement("input");
-        input.className = "form-control";
-        input.type = field.type === "integer" || field.type === "float" ? "number" : "text";
-        if (field.type === "float") input.step = "any";
-        if (field.type === "integer") input.step = "1";
-      }
-
-      input.name = "custom__" + field.name;
-      input.dataset.customField = field.name;
-      if (field.required) input.required = true;
-      var currentValue = values[field.name];
-      if (field.type === "boolean") {
-        input.value = currentValue === true ? "true" : currentValue === false ? "false" : "";
-      } else if (currentValue !== undefined && currentValue !== null) {
-        input.value = currentValue;
-      }
-      wrapper.appendChild(input);
-
-      if (field.unit) {
-        var help = document.createElement("div");
-        help.className = "form-text";
-        help.textContent = "Unit: " + field.unit;
-        wrapper.appendChild(help);
-      }
-      container.appendChild(wrapper);
+    overlay.addEventListener("click", closeLightbox);
+    fullImage.addEventListener("click", function (e) {
+      e.stopPropagation();
     });
-  }
-
-  function collectCustomFieldValues(root, schema) {
-    var values = {};
-    (schema || []).forEach(function (field) {
-      var input = root.querySelector('[name="custom__' + field.name + '"]');
-      if (!input) return;
-      var rawValue = input.value;
-      if (rawValue === "") return;
-
-      if (field.type === "integer") {
-        values[field.name] = parseInt(rawValue, 10);
-      } else if (field.type === "float") {
-        values[field.name] = parseFloat(rawValue);
-      } else if (field.type === "boolean") {
-        values[field.name] = rawValue === "true";
-      } else {
-        values[field.name] = rawValue;
-      }
-    });
-    return values;
-  }
-
-  function categoryContains(nodes, targetId) {
-    var found = false;
-    (nodes || []).forEach(function (node) {
-      if (found) return;
-      if (String(node.id) === String(targetId)) {
-        found = true;
-        return;
-      }
-      if (categoryContains(node.children || [], targetId)) found = true;
-    });
-    return found;
+    document.addEventListener("keydown", onKeydown);
+    overlay.appendChild(fullImage);
+    document.body.appendChild(overlay);
   }
 
   function getCategoryTree(force) {
@@ -511,21 +414,11 @@
   function getInventoryItems(force) {
     if (force) inventoryItemsPromise = null;
     if (!inventoryItemsPromise) {
-      inventoryItemsPromise = raw.get("/items/?page_size=1000&ordering=-last_updated").then(function (res) {
+      inventoryItemsPromise = raw.get("/items/?page_size=1000&ordering=-updated_at").then(function (res) {
         return results(res.data);
       });
     }
     return inventoryItemsPromise;
-  }
-
-  function getChildTypeSchemas(force) {
-    if (force) childTypeSchemasPromise = null;
-    if (!childTypeSchemasPromise) {
-      childTypeSchemasPromise = raw.get("/categories/child-schemas/").then(function (res) {
-        return res.data || {};
-      });
-    }
-    return childTypeSchemasPromise;
   }
 
   function getAttributeChoices(force) {
@@ -568,26 +461,7 @@
 
   function getSidebarCollapsed() {
     var modern = localStorage.getItem(SIDEBAR_COLLAPSED_KEY);
-    if (modern !== null) return modern === "true";
-    return localStorage.getItem(SIDEBAR_COLLAPSED_LEGACY_KEY) === "1";
-  }
-
-  function setSidebarCollapsed(collapsed) {
-    localStorage.setItem(SIDEBAR_COLLAPSED_KEY, collapsed ? "true" : "false");
-    localStorage.setItem(SIDEBAR_COLLAPSED_LEGACY_KEY, collapsed ? "1" : "0");
-    document.documentElement.classList.toggle("sidebar-collapsed", !!collapsed);
-  }
-
-  function getOpenTreeIds() {
-    try {
-      return JSON.parse(localStorage.getItem(SIDEBAR_TREE_KEY) || "[]");
-    } catch (_) {
-      return [];
-    }
-  }
-
-  function setOpenTreeIds(ids) {
-    localStorage.setItem(SIDEBAR_TREE_KEY, JSON.stringify(ids));
+    return modern === "true";
   }
 
   async function logout() {
@@ -641,7 +515,7 @@
       { label: "Add Item", hint: "Action", action: function () { window.location.href = "/add/"; }, requiresWrite: true },
       { label: "Open Administration", hint: "Page", action: function () { window.location.href = "/admin-panel/"; }, requiresSuperuser: true },
       { label: "Toggle Sidebar", hint: "Action", action: function () {
-        var asideToggle = document.getElementById("sidebarToggle");
+        var asideToggle = document.getElementById("sidebarToggleBtn");
         if (asideToggle) asideToggle.click();
       } },
       { label: "Logout", hint: "Session", action: logout },
@@ -695,187 +569,44 @@
 
   function initSidebar(options) {
     options = options || {};
-
     var shell = document.getElementById("appShell");
     var aside = document.getElementById("appSidebar");
     var backdrop = document.getElementById("sidebarBackdrop");
     var main = shell ? shell.querySelector(".app-main") : null;
     if (!shell || !aside || !backdrop) return Promise.resolve(null);
+    var currentUser = options.currentUser || getStoredUser() || { username: getUsername(), role: getUserRole() };
+    var activeNav = options.activeNav || "";
+    var mobileOpen = false;
+    var adminLink = document.getElementById("sidebarAdminLink");
+    var userNameEl = document.getElementById("sidebarUserName");
+    var userRoleEl = document.getElementById("sidebarUserRole");
+    var userAvatarEl = document.getElementById("sidebarUserAvatar");
 
-    // New sidebar v2 handles UI interactions itself.
-    if (aside.classList.contains("sidebar-v2") && window.imsSidebar && typeof window.imsSidebar.init === "function") {
+    if (window.imsSidebar && typeof window.imsSidebar.init === "function") {
       window.imsSidebar.init();
     }
 
-    return Promise.all([
-      options.categoryTree ? Promise.resolve(options.categoryTree) : getCategoryTree(),
-      options.categoryCounts
-        ? Promise.resolve(options.categoryCounts)
-        : getInventoryItems().then(function (items) {
-            return countItemsByCategory(items);
-          }),
-      Promise.resolve(options.currentUser || getStoredUser()),
-    ]).then(function (payload) {
-      var categoryTree = payload[0];
-      var categoryCounts = payload[1];
-      var currentUser = payload[2] || getStoredUser() || { username: getUsername(), role: getUserRole() };
-      var activeNav = options.activeNav || "";
-      var activeCategoryId = options.activeCategoryId !== undefined ? String(options.activeCategoryId) : "all";
-      var openTreeIds = getOpenTreeIds();
-      var didInitActivePath = false;
-      var mobileOpen = false;
-      var treeExpanded = document.getElementById("sidebarTreeExpanded");
-      var treeFloating = document.getElementById("sidebarTreeFloating");
-      var adminLink = document.getElementById("sidebarAdminLink");
-      var userNameEl = document.getElementById("sidebarUserName");
-      var userRoleEl = document.getElementById("sidebarUserRole");
-      var userAvatarEl = document.getElementById("sidebarUserAvatar");
-      var compactLogoutEl = document.getElementById("btnLogoutCompact");
-      var brandToggle = aside.querySelector("#sidebarBrandToggle");
-      var inventoryHead = aside.querySelector(".sidebar-inventory-head");
-      var inventoryMain = aside.querySelector(".inventory-head-main");
+    function setMobileOpen(nextState) {
+      mobileOpen = !!nextState;
+      shell.classList.toggle("sidebar-mobile-open", mobileOpen);
+      document.body.classList.toggle("sidebar-open-mobile", mobileOpen);
+    }
 
-      aside.classList.add("no-transition");
-      window.setTimeout(function () {
-        aside.classList.remove("no-transition");
-      }, 100);
+    function updateShellState() {
+      document.documentElement.classList.toggle("sidebar-collapsed", getSidebarCollapsed());
+    }
 
-      function isTreeOpen(node) {
-        return openTreeIds.indexOf(String(node.id)) >= 0;
-      }
-
-      function getPathToCategory(nodes, targetId, trail) {
-        trail = trail || [];
-        for (var i = 0; i < (nodes || []).length; i += 1) {
-          var node = nodes[i];
-          var nextTrail = trail.concat([String(node.id)]);
-          if (String(node.id) === String(targetId)) return nextTrail;
-          var nested = getPathToCategory(node.children || [], targetId, nextTrail);
-          if (nested.length) return nested;
-        }
-        return [];
-      }
-
-      function renderTreeNodes(nodes) {
-        return (nodes || [])
-          .map(function (node) {
-            var isParent = !!(node.children && node.children.length);
-            var isOpen = isParent && isTreeOpen(node);
-            var isActive = String(node.id) === activeCategoryId;
-            var indentClass = node.depth > 1 ? " tree-indent-" + Math.min(node.depth, 3) : "";
-            var rowClass =
-              "tree-node-row" +
-              (isParent ? " tree-parent" : " tree-leaf") +
-              indentClass +
-              (isActive ? " active" : "");
-            var icon = isParent ? "bi-folder" : "bi-tag";
-            var showLeafCount = !isParent && Number(node.depth) <= 1;
-            var arrow = isParent
-              ? '<i class="bi ' + (isOpen ? "bi-chevron-down" : "bi-chevron-right") + ' ms-auto"></i>'
-              : (showLeafCount
-                ? '<span class="tree-badge">' +
-                  (node.item_count !== undefined ? node.item_count : categoryCounts[String(node.id)] || 0) +
-                  "</span>"
-                : "");
-            var buttonAttrs = isParent
-              ? 'type="button" data-tree-toggle="' + node.id + '"'
-              : 'type="button" data-category-id="' + node.id + '"';
-            return (
-              '<div class="tree-node' +
-              (isOpen ? " open" : "") +
-              '">' +
-              '<button class="' +
-              rowClass +
-              '" ' +
-              buttonAttrs +
-              ">" +
-              '<i class="bi ' +
-              icon +
-              '"></i><span class="tree-label-text">' +
-              node.name +
-              "</span>" +
-              arrow +
-              "</button>" +
-              (isParent ? '<div class="tree-children">' + renderTreeNodes(node.children || []) + "</div>" : "") +
-              "</div>"
-            );
-          })
-          .join("");
-      }
-
-      function setMobileOpen(nextState) {
-        mobileOpen = !!nextState;
-        shell.classList.toggle("sidebar-mobile-open", mobileOpen);
-        document.body.classList.toggle("sidebar-open-mobile", mobileOpen);
-      }
-
-      function updateShellState() {
-        var collapsed = getSidebarCollapsed();
-        document.documentElement.classList.toggle("sidebar-collapsed", collapsed);
-      }
-
-      function renderSidebar() {
-        var username = currentUser.username || getUsername();
-        var initials = getInitials(username);
-        var role = getUserRole(currentUser);
-
-        aside.querySelectorAll("[data-nav]").forEach(function (el) {
-          el.classList.toggle("active", el.getAttribute("data-nav") === activeNav);
-        });
-        aside.querySelectorAll("[data-nav-link]").forEach(function (el) {
-          el.classList.toggle("active", el.getAttribute("data-nav-link") === activeNav);
-        });
-
-        if (userNameEl) userNameEl.textContent = username;
-        if (userRoleEl) userRoleEl.textContent = role;
-        if (userAvatarEl) userAvatarEl.textContent = initials;
-        if (compactLogoutEl) compactLogoutEl.textContent = initials;
-        if (adminLink) adminLink.classList.toggle("d-none", !isSuperuser(currentUser));
-
-        // Sidebar v2 active handling (leaf items).
-        if (aside.classList.contains("sidebar-v2")) {
-          aside.querySelectorAll("[data-nav-id]").forEach(function (el) {
-            el.classList.toggle("active", el.getAttribute("data-nav-id") === activeNav);
-          });
-        }
-
-        if (inventoryHead) inventoryHead.classList.toggle("active", activeNav === "inventory");
-        if (inventoryMain) inventoryMain.classList.toggle("active", activeNav === "inventory");
-        if (!didInitActivePath && activeCategoryId && activeCategoryId !== "all" && !openTreeIds.length) {
-          var path = getPathToCategory(categoryTree, activeCategoryId, []);
-          openTreeIds = path.slice(0, -1);
-          setOpenTreeIds(openTreeIds);
-          didInitActivePath = true;
-        }
-        if (treeExpanded) treeExpanded.innerHTML = renderTreeNodes(categoryTree);
-        if (treeFloating) treeFloating.innerHTML = renderTreeNodes(categoryTree);
-
-        aside.querySelectorAll("[data-tree-toggle]").forEach(function (btn) {
-          btn.onclick = function () {
-            var id = String(btn.getAttribute("data-tree-toggle"));
-            if (openTreeIds.indexOf(id) >= 0) {
-              openTreeIds = openTreeIds.filter(function (value) { return value !== id; });
-            } else {
-              openTreeIds.push(id);
-            }
-            setOpenTreeIds(openTreeIds);
-            renderSidebar();
-          };
-        });
-
-        aside.querySelectorAll("[data-category-id]").forEach(function (btn) {
-          btn.onclick = function () {
-            var categoryId = String(btn.getAttribute("data-category-id"));
-            activeCategoryId = categoryId;
-            if (typeof options.onCategorySelect === "function") options.onCategorySelect(categoryId);
-            else window.location.href = "/inventory/?category=" + encodeURIComponent(categoryId);
-            if (isMobileSidebar()) setMobileOpen(false);
-            renderSidebar();
-          };
-        });
-
-        updateShellState();
-      }
+    function renderSidebar() {
+      var username = currentUser.username || getUsername();
+      if (userNameEl) userNameEl.textContent = username;
+      if (userRoleEl) userRoleEl.textContent = getUserRole(currentUser);
+      if (userAvatarEl) userAvatarEl.textContent = getInitials(username);
+      if (adminLink) adminLink.classList.toggle("d-none", !isSuperuser(currentUser));
+      aside.querySelectorAll("[data-nav-id]").forEach(function (el) {
+        el.classList.toggle("active", el.getAttribute("data-nav-id") === activeNav);
+      });
+      updateShellState();
+    }
 
       if (main && !document.getElementById("mobileSidebarToggle")) {
         var mobileToggle = document.createElement("button");
@@ -883,68 +614,18 @@
         mobileToggle.id = "mobileSidebarToggle";
         mobileToggle.className = "mobile-sidebar-toggle";
         mobileToggle.setAttribute("aria-label", "Open sidebar");
-        mobileToggle.innerHTML = '<i class="bi bi-list"></i>';
+        mobileToggle.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>';
         main.insertBefore(mobileToggle, main.firstChild);
         mobileToggle.addEventListener("click", function () {
           setMobileOpen(true);
         });
       }
 
-      aside.querySelectorAll("#btnLogout, #btnLogoutCompact").forEach(function (btn) {
-        btn.addEventListener("click", function () {
-          logout();
-        });
-      });
-
-      // Sidebar v2 footer logout.
       var v2User = aside.querySelector("#sidebarUser");
       if (v2User) {
         v2User.addEventListener("click", function () {
           if (getSidebarCollapsed()) return;
           logout();
-        });
-      }
-
-      if (brandToggle) {
-        function toggleFromBrand() {
-          if (isMobileSidebar()) {
-            setMobileOpen(!mobileOpen);
-            return;
-          }
-          setSidebarCollapsed(!getSidebarCollapsed());
-          updateShellState();
-        }
-
-        brandToggle.addEventListener("click", function () {
-          toggleFromBrand();
-        });
-
-        brandToggle.addEventListener("keydown", function (e) {
-          if (e.key === "Enter" || e.key === " ") {
-            e.preventDefault();
-            toggleFromBrand();
-          }
-        });
-      }
-
-      var inventoryTreeToggle = aside.querySelector("#inventoryTreeToggle");
-      if (inventoryTreeToggle) {
-        inventoryTreeToggle.addEventListener("click", function (e) {
-          e.preventDefault();
-          e.stopPropagation();
-          var rootIds = categoryTree
-            .filter(function (node) {
-              return node.children && node.children.length;
-            })
-            .map(function (node) {
-              return String(node.id);
-            });
-          var allOpen = rootIds.length && rootIds.every(function (id) {
-            return openTreeIds.indexOf(id) >= 0;
-          });
-          openTreeIds = allOpen ? [] : rootIds.slice();
-          setOpenTreeIds(openTreeIds);
-          renderSidebar();
         });
       }
 
@@ -959,16 +640,13 @@
 
       renderSidebar();
 
-      return {
-        setActiveCategory: function (categoryId) {
-          activeCategoryId = categoryId !== undefined && categoryId !== null ? String(categoryId) : "all";
-          renderSidebar();
-        },
-        setCategoryCounts: function (counts) {
-          categoryCounts = counts || {};
-          renderSidebar();
-        },
-      };
+    return Promise.resolve({
+      setActiveCategory: function () {
+        renderSidebar();
+      },
+      setCategoryCounts: function () {
+        renderSidebar();
+      },
     });
   }
 
@@ -1029,19 +707,15 @@
     buildCategoryIndexes: buildCategoryIndexes,
     countItemsByCategory: countItemsByCategory,
     findCategoryById: findCategoryById,
-    getCategoryCustomFields: getCategoryCustomFields,
     formatCategoryPath: formatCategoryPath,
     formatCategoryLeaf: formatCategoryLeaf,
     formatItemPath: formatItemPath,
     itemImageUrl: itemImageUrl,
     renderItemImage: renderItemImage,
     initImagePicker: initImagePicker,
-    formatCustomFieldValue: formatCustomFieldValue,
-    renderCustomFieldInputs: renderCustomFieldInputs,
-    collectCustomFieldValues: collectCustomFieldValues,
+    openLightbox: openLightbox,
     getCategoryTree: getCategoryTree,
     getInventoryItems: getInventoryItems,
-    getChildTypeSchemas: getChildTypeSchemas,
     getAttributeChoices: getAttributeChoices,
     initSidebar: initSidebar,
     applyPermissionVisibility: applyPermissionVisibility,
@@ -1053,4 +727,3 @@
     USER_ROLE_KEY: USER_ROLE_KEY,
   };
 })();
-

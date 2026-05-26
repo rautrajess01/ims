@@ -30,7 +30,7 @@
           <div class="d-flex align-items-center gap-2 flex-wrap">
             <span class="admin-count-pill" id="categoryCountPill">0 categories</span>
             <button class="btn btn-primary btn-sm" id="btnAddParentCategory" type="button">
-              <i class="bi bi-folder-plus"></i> Add new category
+              Add new category
             </button>
           </div>
         </div>
@@ -106,19 +106,6 @@
             <label class="form-label">Description</label>
             <textarea class="form-control" id="categoryDescription" rows="3"></textarea>
           </div>
-          <div class="mb-3">
-            <label class="form-label">Category field set</label>
-            <select class="form-select" id="categoryChildType">
-              <option value="">Generic item</option>
-              <option value="sfp">SFP</option>
-              <option value="storage">Storage</option>
-              <option value="switch">Switch</option>
-              <option value="cable">Cable</option>
-              <option value="ram">RAM</option>
-              <option value="cpu">CPU</option>
-              <option value="misc">Miscellaneous</option>
-            </select>
-          </div>
         </div>
         <div class="modal-footer">
           <button class="btn btn-primary" type="submit">Save</button>
@@ -181,8 +168,8 @@
     var categories = [];
     var users = [];
 
-    function treeButton(label, icon, className, attrs) {
-      return '<button class="btn btn-sm ' + className + '" type="button" ' + attrs + '><i class="bi ' + icon + '"></i> ' + label + "</button>";
+    function treeButton(label, className, attrs) {
+      return '<button class="btn btn-sm ' + className + '" type="button" ' + attrs + ">" + label + "</button>";
     }
 
     function escapeAttr(value) {
@@ -222,8 +209,8 @@
               '</div>' +
               '<div class="category-meta-wrap">' +
                 '<div class="category-actions">' +
-                  treeButton("Edit", "bi-pencil", "btn-outline-secondary", 'data-edit-category="' + node.id + '"') +
-                  treeButton("Delete", "bi-trash", "btn-outline-danger", 'data-delete-category="' + node.id + '"') +
+                  treeButton("Edit", "btn-outline-secondary", 'data-edit-category="' + node.id + '"') +
+                  treeButton("Delete", "btn-outline-danger", 'data-delete-category="' + node.id + '"') +
                 '</div>' +
               '</div>' +
             '</div>' +
@@ -296,7 +283,6 @@
       var title = document.getElementById("categoryModalTitle");
       document.getElementById("categoryForm").reset();
       document.getElementById("categoryId").value = "";
-      document.getElementById("categoryChildType").value = "";
       if (mode === "edit") {
         var category = findCategoryById(categoryId);
         title.textContent = "Edit category";
@@ -304,7 +290,6 @@
         if (category) {
           document.getElementById("categoryName").value = category.name;
           document.getElementById("categoryDescription").value = category.description || "";
-          document.getElementById("categoryChildType").value = category.child_type || "";
         }
       } else {
         title.textContent = "Create new category";
@@ -392,8 +377,6 @@
         var payload = {
           name: document.getElementById("categoryName").value.trim(),
           description: document.getElementById("categoryDescription").value.trim(),
-          child_type: document.getElementById("categoryChildType").value,
-          parent: null,
         };
         var request = categoryId ? ims.api.patch("/categories/" + categoryId + "/", payload) : ims.api.post("/categories/", payload);
         request.then(function () {

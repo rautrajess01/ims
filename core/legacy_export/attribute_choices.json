@@ -1,0 +1,42 @@
+[
+  {
+    "id": 1,
+    "category": "status",
+    "key": "in_stock",
+    "value": "In Stock",
+    "sort_order": 1,
+    "is_active": true
+  },
+  {
+    "id": 2,
+    "category": "status",
+    "key": "deployed",
+    "value": "Deployed",
+    "sort_order": 2,
+    "is_active": true
+  },
+  {
+    "id": 3,
+    "category": "status",
+    "key": "out_of_stock",
+    "value": "Out of Stock",
+    "sort_order": 3,
+    "is_active": true
+  },
+  {
+    "id": 4,
+    "category": "status",
+    "key": "faulty",
+    "value": "Faulty",
+    "sort_order": 4,
+    "is_active": true
+  },
+  {
+    "id": 5,
+    "category": "status",
+    "key": "na",
+    "value": "N/A",
+    "sort_order": 5,
+    "is_active": true
+  }
+]

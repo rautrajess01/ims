@@ -105,40 +105,7 @@
         }
         if (!img || !itemImageWrap.contains(img)) return;
         event.preventDefault();
-
-        var overlay = document.createElement("div");
-        overlay.style.position = "fixed";
-        overlay.style.inset = "0";
-        overlay.style.zIndex = "2000";
-        overlay.style.display = "flex";
-        overlay.style.alignItems = "center";
-        overlay.style.justifyContent = "center";
-        overlay.style.background = "rgba(0, 0, 0, 0.85)";
-        overlay.style.cursor = "zoom-out";
-
-        var fullImage = document.createElement("img");
-        fullImage.src = img.currentSrc || img.src;
-        fullImage.alt = img.alt || "";
-        fullImage.style.maxWidth = "90vw";
-        fullImage.style.maxHeight = "90vh";
-        fullImage.style.objectFit = "contain";
-        fullImage.addEventListener("click", function (e) {
-          e.stopPropagation();
-        });
-
-        function closeLightbox() {
-          document.removeEventListener("keydown", onKeydown);
-          overlay.remove();
-        }
-
-        function onKeydown(e) {
-          if (e.key === "Escape") closeLightbox();
-        }
-
-        overlay.addEventListener("click", closeLightbox);
-        document.addEventListener("keydown", onKeydown);
-        overlay.appendChild(fullImage);
-        document.body.appendChild(overlay);
+        ims.openLightbox(img.currentSrc || img.src, img.alt || "");
       });
       document.getElementById("titleSpecs").textContent = specs;
       document.getElementById("titleCat").textContent = it.category ? ims.formatCategoryLeaf(it.category) : "—";
@@ -222,4 +189,3 @@
 })();
 </script>
 {% endblock %}
-

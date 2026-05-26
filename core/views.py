@@ -60,10 +60,10 @@ class CurrentUserAPIView(APIView):
 
 
 class CategoryViewSet(viewsets.ModelViewSet):
-    queryset = Category.objects.select_related("parent", "parent__parent").prefetch_related("children").all()
+    queryset = Category.objects.all()
     serializer_class = CategorySerializer
-    ordering_fields = ("name", "id", "parent__name")
-    ordering = ["parent__name", "name"]
+    ordering_fields = ("name", "id")
+    ordering = ["name"]
 
     def get_permissions(self):
         if self.request.method in ("GET", "HEAD", "OPTIONS"):
@@ -72,8 +72,6 @@ class CategoryViewSet(viewsets.ModelViewSet):
 
     def destroy(self, request, *args, **kwargs):
         instance = self.get_object()
-        if instance.children.exists():
-            raise ValidationError({"detail": "Cannot delete this category because it still has child categories."})
         if instance.items.exists():
             raise ValidationError({"detail": "Cannot delete this category because inventory items are assigned to it."})
         try:
@@ -83,8 +81,7 @@ class CategoryViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=["get"], url_path="tree")
     def tree(self, request):
-        roots = self.get_queryset().filter(parent__isnull=True).order_by("name")
-        return Response(CategoryTreeSerializer(roots, many=True).data)
+        return Response(CategoryTreeSerializer(self.get_queryset().order_by("name"), many=True).data)
 
     @action(detail=False, methods=["get"], url_path="child-schemas")
     def child_schemas(self, request):
@@ -110,13 +107,13 @@ class AttributeChoiceViewSet(viewsets.ModelViewSet):
 
 
 class InventoryItemViewSet(viewsets.ModelViewSet):
-    queryset = InventoryItem.objects.select_related("category", "category__parent").all()
+    queryset = InventoryItem.objects.select_related("category").all()
     permission_classes = [IsStaffOrSuperuserWriteOrReadOnly]
     parser_classes = [JSONParser, MultiPartParser, FormParser]
     filterset_class = InventoryItemFilter
-    search_fields = ("specs", "brand", "remark", "activity_note", "category__name", "category__parent__name")
-    ordering_fields = ("created_at", "last_updated", "quantity", "id", "specs", "brand", "status")
-    ordering = ["-last_updated"]
+    search_fields = ("name", "brand", "remark", "activity_note", "category__name")
+    ordering_fields = ("created_at", "updated_at", "quantity", "id", "name", "brand", "status")
+    ordering = ["-updated_at"]
 
     def get_serializer_class(self):
         if self.action in ("create", "update", "partial_update"):
@@ -189,37 +186,30 @@ class DashboardAPIView(APIView):
     def get(self, request):
         total_items = InventoryItem.objects.count()
         by_cat = {}
-        by_parent_cat = {}
         category_totals = {
             cat.id: {
                 "id": cat.id,
                 "name": cat.name,
                 "full_name": cat.full_name,
-                "parent": cat.parent_id,
+                "parent": None,
                 "depth": cat.depth,
                 "is_leaf": cat.is_leaf,
                 "item_count": 0,
                 "total_count": 0,
             }
-            for cat in Category.objects.select_related("parent", "parent__parent").prefetch_related("children")
+            for cat in Category.objects.all()
         }
-        for row in InventoryItem.objects.select_related("category", "category__parent").only("id", "category_id"):
+        by_parent_cat = {}
+        for row in InventoryItem.objects.select_related("category").only("id", "category_id", "category__name"):
             key = row.category.full_name
             by_cat[key] = by_cat.get(key, 0) + 1
             if row.category_id in category_totals:
                 category_totals[row.category_id]["item_count"] += 1
-            parent = row.category
-            while parent is not None:
-                if parent.id in category_totals:
-                    category_totals[parent.id]["total_count"] += 1
-                parent = parent.parent
-            parent = row.category
-            while parent.parent is not None:
-                parent = parent.parent
-            by_parent_cat[parent.name] = by_parent_cat.get(parent.name, 0) + 1
+                category_totals[row.category_id]["total_count"] += 1
+            by_parent_cat[row.category.name] = by_parent_cat.get(row.category.name, 0) + 1
         by_status = dict(InventoryItem.objects.values("status").annotate(c=Count("id")).values_list("status", "c"))
         recent_updated_count = InventoryItem.objects.filter(
-            last_updated__gte=timezone.now() - timedelta(days=7)
+            updated_at__gte=timezone.now() - timedelta(days=7)
         ).count()
         recent = InventoryLog.objects.select_related("item", "item__category", "performed_by").order_by(
             "-timestamp"
@@ -285,20 +275,19 @@ class ExportItemsAPIView(APIView):
             ]
         )
         for row in InventoryItem.objects.select_related("category").order_by("id").iterator():
-            child = row.get_child()
             child_data = {}
-            if child is not None:
-                for field in child._meta.get_fields():
-                    if field.name == "id" or field.name == "inventory_item":
-                        continue
-                    val = getattr(child, field.name)
-                    if val is not None:
-                        child_data[field.name] = val
+            for field in (
+                "item_type", "interface", "ports_1g", "ports_10g", "ports_25g",
+                "ports_40g", "ports_100g", "ports_other", "cable_length_m",
+            ):
+                val = getattr(row, field)
+                if val not in (None, ""):
+                    child_data[field] = val
             writer.writerow(
                 [
                     row.id,
                     row.category.full_name,
-                    row.specs,
+                    row.name,
                     row.brand or "",
                     row.capacity_value,
                     row.capacity_unit or "",
@@ -308,7 +297,7 @@ class ExportItemsAPIView(APIView):
                     row.remark,
                     row.activity_note,
                     row.created_at.isoformat() if row.created_at else "",
-                    row.last_updated.isoformat() if row.last_updated else "",
+                    row.updated_at.isoformat() if row.updated_at else "",
                 ]
             )
         return response
@@ -437,7 +426,7 @@ class ImportItemsAPIView(APIView):
         target = category_value.strip()
         if not target:
             return None
-        candidates = Category.objects.select_related("parent").all()
+        candidates = Category.objects.all()
         for category in candidates:
             if category.full_name.lower() == target.lower():
                 return category

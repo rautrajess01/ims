@@ -18,11 +18,6 @@
           </select>
           <div class="form-text d-none" id="categoryEmptyState">No item categories are available.</div>
         </div>
-        <div id="categorySpecificFields" class="d-none mb-3">
-          <hr class="my-3" />
-          <h6 class="text-secondary mb-2">Category-specific fields</h6>
-          <div id="catChildFields"></div>
-        </div>
         <div class="mb-3">
           <label class="form-label">Specs</label>
           <input class="form-control" type="text" name="specs" required placeholder="e.g. 1G SFP module" />
@@ -278,19 +273,13 @@
     if (!boot) return;
     Promise.all([
       ims.getCategoryTree(true),
-      ims.getChildTypeSchemas(true).catch(function () { return CHILD_TYPE_SCHEMA; }),
       ims.getAttributeChoices(true).catch(function () { return {}; }),
     ]).then(function (res) {
       categoryTree = res[0] || [];
       categoryFlat = ims.flattenCategoryTree(categoryTree || []);
-      CHILD_TYPE_SCHEMA = res[1] || CHILD_TYPE_SCHEMA;
-      populateStatusChoices(res[2] || {});
+      populateStatusChoices(res[1] || {});
       var sel = document.getElementById("selCat");
       renderCategoryOptions(categoryTree, categoryFlat);
-      sel.addEventListener("change", function () {
-        renderCategoryChildFields(getCategoryChildType(parseInt(sel.value, 10)));
-      });
-      renderCategoryChildFields(getCategoryChildType(parseInt(sel.value, 10)));
     }).catch(function () {
       document.getElementById("selCat").innerHTML = '<option value="">Could not load categories</option>';
       document.getElementById("categoryEmptyState").classList.remove("d-none");

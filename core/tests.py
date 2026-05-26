@@ -1,5 +1,4 @@
 from django.contrib.auth import get_user_model
-from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db.models import ProtectedError
 from rest_framework import status
@@ -23,82 +22,44 @@ def create_status_choices():
         AttributeChoice.objects.create(category="status", key=key, value=value, sort_order=index)
 
 
-class CategoryHierarchyTests(APITestCase):
+class CategoryApiTests(APITestCase):
     def setUp(self):
         self.user = User.objects.create_user(username="tester", password="secret123", is_staff=True)
         self.client.force_authenticate(self.user)
         create_status_choices()
 
-    def test_item_cannot_be_assigned_to_parent_category(self):
-        parent = Category.objects.create(name="Lab")
-        Category.objects.create(name="Blade", parent=parent)
+    def test_category_tree_endpoint_returns_flat_structure(self):
+        category = Category.objects.create(name="API Category")
 
-        response = self.client.post(
-            "/api/v1/items/",
-            {
-                "category": parent.id,
-                "specs": "Some item",
-                "quantity": 4,
-                "status": InventoryItem.Status.IN_STOCK,
-            },
-            format="json",
-        )
+        response = self.client.get("/api/v1/categories/tree/")
 
-        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertEqual(
-            response.data["category"][0],
-            "Inventory items can only be assigned to leaf categories.",
-        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        node = next(row for row in response.data if row["id"] == category.id)
+        self.assertEqual(node["name"], "API Category")
+        self.assertEqual(node["children"], [])
+        self.assertTrue(node["is_leaf"])
 
-    def test_category_depth_cannot_exceed_three_levels(self):
-        root = Category.objects.create(name="Root A")
-        middle = Category.objects.create(name="Level B", parent=root)
-        leaf = Category.objects.create(name="Level C", parent=middle)
+    def test_category_serializer_keeps_legacy_parent_fields_empty(self):
+        category = Category.objects.create(name="Flat Category")
 
-        with self.assertRaises(ValidationError):
-            Category.objects.create(name="Too Deep", parent=leaf)
+        response = self.client.get(f"/api/v1/categories/{category.id}/")
 
-    def test_cannot_add_child_under_category_with_items(self):
-        root = Category.objects.create(name="Standalone")
-        InventoryItem.objects.create(
-            category=root,
-            specs="Standalone unit",
-            quantity=1,
-            status=InventoryItem.Status.IN_STOCK,
-        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIsNone(response.data["parent"])
+        self.assertIsNone(response.data["parent_name"])
+        self.assertEqual(response.data["child_type"], "")
 
-        with self.assertRaises(ValidationError):
-            Category.objects.create(name="Miscellaneous", parent=root)
-
-    def test_cannot_delete_category_with_children_or_items(self):
-        parent = Category.objects.create(name="Delete Parent")
-        child = Category.objects.create(name="Delete Child", parent=parent)
+    def test_cannot_delete_category_with_items(self):
         item_category = Category.objects.create(name="Delete Item Category")
         InventoryItem.objects.create(
             category=item_category,
-            specs="Delete unit",
+            name="Delete unit",
             quantity=2,
             status=InventoryItem.Status.IN_STOCK,
         )
 
         with self.assertRaises(ProtectedError):
-            parent.delete()
-        with self.assertRaises(ProtectedError):
             item_category.delete()
-
-        child.delete()
-
-    def test_category_tree_endpoint_returns_nested_structure(self):
-        parent = Category.objects.create(name="API Root")
-        Category.objects.create(name="API Leaf", parent=parent)
-
-        response = self.client.get("/api/v1/categories/tree/")
-
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
-        node = next(row for row in response.data if row["name"] == "API Root")
-        self.assertEqual(node["children"][0]["name"], "API Leaf")
-        self.assertEqual(node["children"][0]["full_name"], "API Root > API Leaf")
-        self.assertTrue(node["children"][0]["is_leaf"])
 
 
 class RoleAndAdminApiTests(APITestCase):
@@ -200,10 +161,10 @@ class RoleAndAdminApiTests(APITestCase):
         )
 
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
-        item = InventoryItem.objects.get(specs="Photo switch")
+        item = InventoryItem.objects.get(name="Photo switch")
         self.assertTrue(item.image.name.startswith("inventory/"))
 
-    def test_generic_category_rejects_child_data(self):
+    def test_unknown_child_data_keys_are_ignored(self):
         self.client.force_authenticate(self.staff)
 
         response = self.client.post(
@@ -218,17 +179,17 @@ class RoleAndAdminApiTests(APITestCase):
             format="json",
         )
 
-        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertIn("child_data", response.data)
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        item = InventoryItem.objects.get(id=response.data["id"])
+        self.assertIsNone(item.item_type)
 
-    def test_inventory_item_create_with_child_data_creates_child(self):
+    def test_inventory_item_create_with_child_data_maps_flat_fields(self):
         self.client.force_authenticate(self.staff)
-        switch_cat = Category.objects.create(name="Switch", child_type="switch")
 
         response = self.client.post(
             "/api/v1/items/",
             {
-                "category": switch_cat.id,
+                "category": self.category.id,
                 "specs": "Switch-10G",
                 "child_data": {"ports_1g": 24, "ports_10g": 4},
                 "quantity": 2,
@@ -239,17 +200,15 @@ class RoleAndAdminApiTests(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         item = InventoryItem.objects.get(id=response.data["id"])
-        self.assertIsNotNone(item.get_child())
-        self.assertEqual(item.get_child().ports_1g, 24)
-        self.assertEqual(item.get_child().ports_10g, 4)
+        self.assertEqual(item.ports_1g, 24)
+        self.assertEqual(item.ports_10g, 4)
 
     def test_inventory_item_read_returns_child_data(self):
         self.client.force_authenticate(self.staff)
-        switch_cat = Category.objects.create(name="Switch", child_type="switch")
         response = self.client.post(
             "/api/v1/items/",
             {
-                "category": switch_cat.id,
+                "category": self.category.id,
                 "specs": "Switch-10G",
                 "child_data": {"ports_1g": 24, "ports_10g": 4},
                 "quantity": 1,
@@ -268,7 +227,7 @@ class RoleAndAdminApiTests(APITestCase):
     def test_inventory_item_update_persists_activity_note(self):
         item = InventoryItem.objects.create(
             category=self.category,
-            specs="Switch SW-01",
+            name="Switch SW-01",
             quantity=5,
             status=InventoryItem.Status.IN_STOCK,
         )
@@ -327,7 +286,7 @@ class RoleAndAdminApiTests(APITestCase):
         self.client.force_authenticate(self.superuser)
         InventoryItem.objects.create(
             category=self.category,
-            specs="Delete category unit",
+            name="Delete category unit",
             quantity=1,
             status=InventoryItem.Status.IN_STOCK,
         )
@@ -356,13 +315,13 @@ class RoleAndAdminApiTests(APITestCase):
         self.client.force_authenticate(self.superuser)
         InventoryItem.objects.create(
             category=self.category,
-            specs="Low Switch",
+            name="Low Switch",
             quantity=1,
             status=InventoryItem.Status.IN_STOCK,
         )
         InventoryItem.objects.create(
             category=self.category,
-            specs="Healthy Switch",
+            name="Healthy Switch",
             quantity=8,
             status=InventoryItem.Status.IN_STOCK,
         )
@@ -378,7 +337,7 @@ class RoleAndAdminApiTests(APITestCase):
         self.client.force_authenticate(self.staff)
         item = InventoryItem.objects.create(
             category=self.category,
-            specs="Export Unit",
+            name="Export Unit",
             quantity=2,
             status=InventoryItem.Status.IN_STOCK,
         )

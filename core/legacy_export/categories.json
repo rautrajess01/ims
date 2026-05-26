@@ -1,0 +1,37 @@
+[
+  {
+    "id": 3,
+    "name": "CPU",
+    "description": "Processors"
+  },
+  {
+    "id": 2,
+    "name": "RAM",
+    "description": "Memory"
+  },
+  {
+    "id": 11,
+    "name": "Miscellaneous",
+    "description": "Other miscellaneous items"
+  },
+  {
+    "id": 6,
+    "name": "SFP",
+    "description": "Transreceivers"
+  },
+  {
+    "id": 4,
+    "name": "Storage",
+    "description": "Hard disks, SSDs"
+  },
+  {
+    "id": 7,
+    "name": "Switch",
+    "description": "Network Switches"
+  },
+  {
+    "id": 12,
+    "name": "Cables",
+    "description": "Cables"
+  }
+]

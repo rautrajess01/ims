@@ -1,17 +1,15 @@
 import django_filters
-from django.db.models import Q
 
 from .models import InventoryItem, InventoryLog
 
 
 class InventoryItemFilter(django_filters.FilterSet):
-    category = django_filters.NumberFilter(method="filter_category")
-    parent_category = django_filters.NumberFilter(field_name="category__parent_id")
-    root_category = django_filters.NumberFilter(method="filter_root_category")
+    category = django_filters.NumberFilter(field_name="category_id")
     status = django_filters.CharFilter()
-    name = django_filters.CharFilter(field_name="specs", lookup_expr="icontains")
-    specs = django_filters.CharFilter(field_name="specs", lookup_expr="icontains")
+    name = django_filters.CharFilter(field_name="name", lookup_expr="icontains")
+    specs = django_filters.CharFilter(field_name="name", lookup_expr="icontains")
     brand = django_filters.CharFilter(field_name="brand", lookup_expr="icontains")
+    item_type = django_filters.CharFilter(field_name="item_type", lookup_expr="icontains")
     capacity_unit = django_filters.CharFilter(field_name="capacity_unit", lookup_expr="iexact")
     capacity_min = django_filters.NumberFilter(field_name="capacity_value", lookup_expr="gte")
     capacity_max = django_filters.NumberFilter(field_name="capacity_value", lookup_expr="lte")
@@ -20,25 +18,10 @@ class InventoryItemFilter(django_filters.FilterSet):
     low_stock = django_filters.BooleanFilter(method="filter_low_stock")
     created_after = django_filters.IsoDateTimeFilter(field_name="created_at", lookup_expr="gte")
     created_before = django_filters.IsoDateTimeFilter(field_name="created_at", lookup_expr="lte")
-    updated_after = django_filters.IsoDateTimeFilter(field_name="last_updated", lookup_expr="gte")
-    updated_before = django_filters.IsoDateTimeFilter(field_name="last_updated", lookup_expr="lte")
+    updated_after = django_filters.IsoDateTimeFilter(field_name="updated_at", lookup_expr="gte")
+    updated_before = django_filters.IsoDateTimeFilter(field_name="updated_at", lookup_expr="lte")
     remark = django_filters.CharFilter(field_name="remark", lookup_expr="icontains")
     activity_note = django_filters.CharFilter(field_name="activity_note", lookup_expr="icontains")
-    child_type = django_filters.CharFilter(field_name="category__child_type")
-
-    def filter_category(self, queryset, name, value):
-        return queryset.filter(
-            Q(category_id=value) |
-            Q(category__parent_id=value) |
-            Q(category__parent__parent_id=value)
-        )
-
-    def filter_root_category(self, queryset, name, value):
-        return queryset.filter(
-            Q(category_id=value) |
-            Q(category__parent_id=value) |
-            Q(category__parent__parent_id=value)
-        )
 
     def filter_low_stock(self, queryset, name, value):
         return queryset.filter(quantity__lte=2) if value else queryset
@@ -46,10 +29,10 @@ class InventoryItemFilter(django_filters.FilterSet):
     class Meta:
         model = InventoryItem
         fields = [
-            "category", "parent_category", "root_category", "status", "name", "specs", "brand",
-            "capacity_unit", "capacity_min", "capacity_max", "quantity_min", "quantity_max",
-            "low_stock", "created_after", "created_before", "updated_after", "updated_before",
-            "remark", "activity_note", "child_type",
+            "category", "status", "name", "specs", "brand", "item_type",
+            "capacity_unit", "capacity_min", "capacity_max", "quantity_min",
+            "quantity_max", "low_stock", "created_after", "created_before",
+            "updated_after", "updated_before", "remark", "activity_note",
         ]
 
 
